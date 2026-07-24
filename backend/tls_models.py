@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from ipaddress import IPv4Address, IPv6Address
 from socket import AddressFamily
@@ -37,6 +38,41 @@ class VerifiedLeafCertificate:
     certificate_sha256: str
 
 
+@dataclass(frozen=True)
+class ParsedCertificate:
+    subject: str
+    issuer: str
+    valid_from: datetime
+    expires_at: datetime
+    dns_names: tuple[str, ...]
+    serial_number: str
+    signature_algorithm: str
+    public_key_type: str
+    public_key_size: int | None
+
+
+class FindingCode(str, Enum):
+    CERTIFICATE_EXPIRED = "certificate_expired"
+    EXPIRES_WITHIN_7_DAYS = "expires_within_7_days"
+    EXPIRES_WITHIN_30_DAYS = "expires_within_30_days"
+    NO_DNS_SANS = "no_dns_sans"
+    WEAK_SIGNATURE_ALGORITHM = "weak_signature_algorithm"
+    HEALTHY_CERTIFICATE = "healthy_certificate"
+
+
+class FindingSeverity(str, Enum):
+    CRITICAL = "critical"
+    WARNING = "warning"
+    INFO = "info"
+
+
+@dataclass(frozen=True)
+class CertificateFinding:
+    code: FindingCode
+    severity: FindingSeverity
+    message: str
+
+
 class FailureStage(str, Enum):
     TARGET_VALIDATION = "target_validation"
     DNS = "dns"
@@ -54,6 +90,7 @@ class FailureCode(str, Enum):
     TLS_VERIFICATION_FAILED = "tls_verification_failed"
     TLS_FAILURE = "tls_failure"
     MISSING_PEER_CERTIFICATE = "missing_peer_certificate"
+    CERTIFICATE_PARSE_FAILED = "certificate_parse_failed"
     OVERALL_TIMEOUT = "overall_timeout"
 
 
