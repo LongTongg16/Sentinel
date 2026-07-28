@@ -4,6 +4,20 @@ from typing import Annotated, Literal, Protocol
 from fastapi import Depends, FastAPI, Response, status
 from pydantic import BaseModel, Field
 
+from backend.http_collector import (
+    HttpCollectionResult,
+    collect_http_security_headers,
+)
+from backend.http_findings import evaluate_http_header_findings
+from backend.http_headers import normalize_security_headers
+from backend.http_models import (
+    HttpCollectionFailureCode,
+    HttpCollectionStage,
+    HttpHeaderCollectionFailure,
+    HttpHeaderFindingCode,
+    NormalizedSecurityHeaders,
+    SecurityHeaderValue,
+)
 from backend.tls_certificate import CertificateParseError, parse_leaf_certificate
 from backend.tls_collector import CollectionResult, collect_verified_leaf
 from backend.tls_findings import (
@@ -20,6 +34,7 @@ from backend.tls_models import (
 
 
 TLS_COLLECTION_OVERALL_TIMEOUT = 10.0
+HTTP_HEADER_COLLECTION_OVERALL_TIMEOUT = 10.0
 
 
 class TlsLeafCertificateRequest(BaseModel):
@@ -62,6 +77,54 @@ TlsLeafCertificateResponse = Annotated[
 ]
 
 
+class HttpSecurityHeadersRequest(BaseModel):
+    hostname: str
+
+
+class SecurityHeaderValueResponse(BaseModel):
+    present: bool
+    value: str | None
+
+
+class NormalizedSecurityHeadersResponse(BaseModel):
+    strict_transport_security: SecurityHeaderValueResponse
+    content_security_policy: SecurityHeaderValueResponse
+    x_content_type_options: SecurityHeaderValueResponse
+    x_frame_options: SecurityHeaderValueResponse
+    referrer_policy: SecurityHeaderValueResponse
+    permissions_policy: SecurityHeaderValueResponse
+
+
+class HttpHeaderFindingResponse(BaseModel):
+    code: HttpHeaderFindingCode
+    severity: FindingSeverity
+    message: str
+
+
+class HttpSecurityHeadersSuccess(BaseModel):
+    status: Literal["success"] = "success"
+    requested_hostname: str
+    connected_ip: str
+    final_url: str
+    final_hostname: str
+    http_status_code: int
+    redirect_count: int
+    headers: NormalizedSecurityHeadersResponse
+    findings: tuple[HttpHeaderFindingResponse, ...]
+
+
+class HttpSecurityHeadersFailure(BaseModel):
+    status: Literal["failure"] = "failure"
+    stage: HttpCollectionStage
+    code: HttpCollectionFailureCode
+
+
+HttpSecurityHeadersResponse = Annotated[
+    HttpSecurityHeadersSuccess | HttpSecurityHeadersFailure,
+    Field(discriminator="status"),
+]
+
+
 class TlsCollector(Protocol):
     async def __call__(
         self,
@@ -74,6 +137,20 @@ class TlsCollector(Protocol):
 
 def get_tls_collector() -> TlsCollector:
     return collect_verified_leaf
+
+
+class HttpHeaderCollector(Protocol):
+    async def __call__(
+        self,
+        hostname: str,
+        *,
+        overall_timeout: float,
+    ) -> HttpCollectionResult:
+        ...
+
+
+def get_http_header_collector() -> HttpHeaderCollector:
+    return collect_http_security_headers
 
 
 def get_current_time() -> datetime:
@@ -91,6 +168,30 @@ FAILURE_HTTP_STATUS: dict[FailureCode, int] = {
     FailureCode.MISSING_PEER_CERTIFICATE: status.HTTP_502_BAD_GATEWAY,
     FailureCode.CERTIFICATE_PARSE_FAILED: status.HTTP_502_BAD_GATEWAY,
     FailureCode.OVERALL_TIMEOUT: status.HTTP_504_GATEWAY_TIMEOUT,
+}
+
+HTTP_FAILURE_STATUS: dict[HttpCollectionFailureCode, int] = {
+    HttpCollectionFailureCode.INVALID_HOSTNAME: (
+        status.HTTP_422_UNPROCESSABLE_CONTENT
+    ),
+    HttpCollectionFailureCode.BLOCKED_ADDRESS: status.HTTP_403_FORBIDDEN,
+    HttpCollectionFailureCode.BLOCKED_REDIRECT: status.HTTP_403_FORBIDDEN,
+    HttpCollectionFailureCode.DNS_FAILURE: status.HTTP_502_BAD_GATEWAY,
+    HttpCollectionFailureCode.NO_ADDRESSES: status.HTTP_502_BAD_GATEWAY,
+    HttpCollectionFailureCode.CONNECTION_FAILURE: status.HTTP_502_BAD_GATEWAY,
+    HttpCollectionFailureCode.TLS_VERIFICATION_FAILED: (
+        status.HTTP_502_BAD_GATEWAY
+    ),
+    HttpCollectionFailureCode.TLS_FAILURE: status.HTTP_502_BAD_GATEWAY,
+    HttpCollectionFailureCode.REQUEST_FAILURE: status.HTTP_502_BAD_GATEWAY,
+    HttpCollectionFailureCode.MALFORMED_RESPONSE: status.HTTP_502_BAD_GATEWAY,
+    HttpCollectionFailureCode.INVALID_REDIRECT: status.HTTP_502_BAD_GATEWAY,
+    HttpCollectionFailureCode.UNSUPPORTED_REDIRECT_SCHEME: (
+        status.HTTP_502_BAD_GATEWAY
+    ),
+    HttpCollectionFailureCode.TOO_MANY_REDIRECTS: status.HTTP_502_BAD_GATEWAY,
+    HttpCollectionFailureCode.REDIRECT_LOOP: status.HTTP_502_BAD_GATEWAY,
+    HttpCollectionFailureCode.OVERALL_TIMEOUT: status.HTTP_504_GATEWAY_TIMEOUT,
 }
 
 app = FastAPI(title="Sentinel Security API")
@@ -157,6 +258,80 @@ async def collect_tls_leaf_certificate(
         public_key_size=certificate.public_key_size,
         findings=tuple(
             CertificateFindingResponse(
+                code=finding.code,
+                severity=finding.severity,
+                message=finding.message,
+            )
+            for finding in findings
+        ),
+    )
+
+
+def _header_value_response(
+    header: SecurityHeaderValue,
+) -> SecurityHeaderValueResponse:
+    return SecurityHeaderValueResponse(
+        present=header.present,
+        value=header.value,
+    )
+
+
+def _headers_response(
+    headers: NormalizedSecurityHeaders,
+) -> NormalizedSecurityHeadersResponse:
+    return NormalizedSecurityHeadersResponse(
+        strict_transport_security=_header_value_response(
+            headers.strict_transport_security
+        ),
+        content_security_policy=_header_value_response(
+            headers.content_security_policy
+        ),
+        x_content_type_options=_header_value_response(
+            headers.x_content_type_options
+        ),
+        x_frame_options=_header_value_response(headers.x_frame_options),
+        referrer_policy=_header_value_response(headers.referrer_policy),
+        permissions_policy=_header_value_response(headers.permissions_policy),
+    )
+
+
+@app.post(
+    "/api/v1/http/security-headers",
+    response_model=HttpSecurityHeadersResponse,
+)
+async def collect_http_headers(
+    request: HttpSecurityHeadersRequest,
+    response: Response,
+    collector: Annotated[
+        HttpHeaderCollector,
+        Depends(get_http_header_collector),
+    ],
+) -> HttpSecurityHeadersResponse:
+    result = await collector(
+        request.hostname,
+        overall_timeout=HTTP_HEADER_COLLECTION_OVERALL_TIMEOUT,
+    )
+
+    if isinstance(result, HttpHeaderCollectionFailure):
+        response.status_code = HTTP_FAILURE_STATUS[result.code]
+        return HttpSecurityHeadersFailure(
+            stage=result.stage,
+            code=result.code,
+        )
+
+    normalized_headers = normalize_security_headers(result.headers)
+    findings = evaluate_http_header_findings(normalized_headers)
+
+    return HttpSecurityHeadersSuccess(
+        requested_hostname=result.requested_hostname,
+        connected_ip=str(result.connected_ip),
+        final_url=result.final_url,
+        final_hostname=result.final_hostname,
+        http_status_code=result.http_status_code,
+        redirect_count=result.redirect_count,
+        headers=_headers_response(normalized_headers),
+        findings=tuple(
+            HttpHeaderFindingResponse(
                 code=finding.code,
                 severity=finding.severity,
                 message=finding.message,
