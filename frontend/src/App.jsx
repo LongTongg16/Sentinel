@@ -2,8 +2,10 @@ import { useState } from 'react'
 
 const API_BASE_URL = '/api/v1'
 const TLS_LEAF_CERTIFICATE_ENDPOINT = `${API_BASE_URL}/tls/leaf-certificate`
+const HTTP_SECURITY_HEADERS_ENDPOINT = `${API_BASE_URL}/http/security-headers`
+const SCAN_REQUEST_TIMEOUT_MS = 15000
 
-const REQUIRED_SUCCESS_STRING_FIELDS = [
+const TLS_SUCCESS_STRING_FIELDS = [
   'hostname',
   'connected_ip',
   'certificate_sha256',
@@ -16,6 +18,22 @@ const REQUIRED_SUCCESS_STRING_FIELDS = [
   'public_key_type',
 ]
 
+const HTTP_SUCCESS_STRING_FIELDS = [
+  'requested_hostname',
+  'connected_ip',
+  'final_url',
+  'final_hostname',
+]
+
+const HTTP_HEADER_FIELDS = [
+  { key: 'strict_transport_security', label: 'Strict-Transport-Security' },
+  { key: 'content_security_policy', label: 'Content-Security-Policy' },
+  { key: 'x_content_type_options', label: 'X-Content-Type-Options' },
+  { key: 'x_frame_options', label: 'X-Frame-Options' },
+  { key: 'referrer_policy', label: 'Referrer-Policy' },
+  { key: 'permissions_policy', label: 'Permissions-Policy' },
+]
+
 function isFinding(value) {
   return (
     value !== null &&
@@ -26,10 +44,10 @@ function isFinding(value) {
   )
 }
 
-function isSuccessResponse(value) {
+function isTlsSuccessResponse(value) {
   return (
     value?.status === 'success' &&
-    REQUIRED_SUCCESS_STRING_FIELDS.every(
+    TLS_SUCCESS_STRING_FIELDS.every(
       (field) => typeof value[field] === 'string',
     ) &&
     Number.isInteger(value.days_remaining) &&
@@ -37,6 +55,37 @@ function isSuccessResponse(value) {
     value.dns_names.every((dnsName) => typeof dnsName === 'string') &&
     (value.public_key_size === null ||
       Number.isInteger(value.public_key_size)) &&
+    Array.isArray(value.findings) &&
+    value.findings.every(isFinding)
+  )
+}
+
+function isSecurityHeaderValue(value) {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    typeof value.present === 'boolean' &&
+    (value.value === null || typeof value.value === 'string')
+  )
+}
+
+function isNormalizedHeaders(value) {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    HTTP_HEADER_FIELDS.every(({ key }) => isSecurityHeaderValue(value[key]))
+  )
+}
+
+function isHttpSuccessResponse(value) {
+  return (
+    value?.status === 'success' &&
+    HTTP_SUCCESS_STRING_FIELDS.every(
+      (field) => typeof value[field] === 'string',
+    ) &&
+    Number.isInteger(value.http_status_code) &&
+    Number.isInteger(value.redirect_count) &&
+    isNormalizedHeaders(value.headers) &&
     Array.isArray(value.findings) &&
     value.findings.every(isFinding)
   )
@@ -139,7 +188,11 @@ function getSummarySeverity(findings) {
     return 'warning'
   }
 
-  return 'info'
+  if (findings.some((finding) => finding.severity === 'info')) {
+    return 'info'
+  }
+
+  return 'unknown'
 }
 
 function MetadataItem({ label, children, monospace = false }) {
@@ -326,21 +379,19 @@ function FindingCard({ finding }) {
   )
 }
 
-function FindingsList({ findings }) {
+function FindingsList({ findings, title, description, emptyMessage, headingId }) {
   return (
     <section
       className="rounded-xl border border-slate-800 bg-slate-900 p-5 sm:p-6"
-      aria-labelledby="security-findings-heading"
+      aria-labelledby={headingId}
     >
       <h2
         className="text-xl font-semibold text-slate-100"
-        id="security-findings-heading"
+        id={headingId}
       >
-        Security findings
+        {title}
       </h2>
-      <p className="mt-2 text-sm text-slate-400">
-        Certificate observations evaluated by the Sentinel backend.
-      </p>
+      <p className="mt-2 text-sm text-slate-400">{description}</p>
 
       {findings.length > 0 ? (
         <ul className="mt-5 grid gap-3" role="list">
@@ -353,71 +404,238 @@ function FindingsList({ findings }) {
         </ul>
       ) : (
         <p className="mt-5 rounded-lg border border-slate-700 bg-slate-950/50 p-4 text-sm text-slate-300">
-          No certificate findings were returned.
+          {emptyMessage}
         </p>
       )}
     </section>
   )
 }
 
+function HeaderPresenceBadge({ present }) {
+  return (
+    <span
+      className={`inline-flex w-fit shrink-0 items-center rounded-full border px-2.5 py-1 text-xs font-semibold uppercase tracking-wide ${
+        present
+          ? 'border-emerald-700 bg-emerald-900/60 text-emerald-100'
+          : 'border-slate-600 bg-slate-800 text-slate-300'
+      }`}
+    >
+      {present ? 'Present' : 'Missing'}
+    </span>
+  )
+}
+
+function HeaderRow({ header, label }) {
+  const isPresent = header?.present === true
+  const value = typeof header?.value === 'string' ? header.value : null
+  const hasValue = value !== null && value.trim() !== ''
+
+  return (
+    <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-950/50 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="min-w-0 break-words font-mono text-sm font-semibold text-slate-100 [overflow-wrap:anywhere]">
+          {label}
+        </span>
+        <HeaderPresenceBadge present={isPresent} />
+      </div>
+
+      {isPresent && (
+        <p className="mt-3 min-w-0 break-all text-sm text-slate-300 [overflow-wrap:anywhere]">
+          {hasValue ? (
+            <span className="font-mono text-slate-100">{value}</span>
+          ) : (
+            <span className="italic text-slate-400">
+              Present with an empty value
+            </span>
+          )}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function SecurityHeadersList({ headers, finalUrl }) {
+  const hasFinalUrl = typeof finalUrl === 'string' && finalUrl.trim() !== ''
+
+  return (
+    <section
+      className="rounded-xl border border-slate-800 bg-slate-900 p-5 sm:p-6"
+      aria-labelledby="http-headers-heading"
+    >
+      <h2
+        className="text-xl font-semibold text-slate-100"
+        id="http-headers-heading"
+      >
+        HTTP security headers
+      </h2>
+      <p className="mt-2 min-w-0 break-words text-sm text-slate-400 [overflow-wrap:anywhere]">
+        {hasFinalUrl
+          ? `Header values observed in the final response at ${finalUrl}.`
+          : 'Header values observed in the final HTTP response.'}
+      </p>
+
+      <div className="mt-5 grid min-w-0 items-start gap-3 sm:grid-cols-2">
+        {HTTP_HEADER_FIELDS.map(({ key, label }) => (
+          <HeaderRow header={headers[key]} key={key} label={label} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function CollectionFailureNotice({ result, title }) {
+  return (
+    <section className="rounded-xl border border-amber-900 bg-amber-950/30 p-6">
+      <p className="sr-only" role="status">
+        {title}. Stage: {result.stage}. Code: {result.code}.
+      </p>
+      <h2 className="text-lg font-semibold text-amber-300">{title}</h2>
+      <dl className="mt-5 grid gap-5 sm:grid-cols-2">
+        <div className="min-w-0">
+          <dt className="text-sm text-slate-400">Stage</dt>
+          <dd className="mt-1 break-words font-mono text-sm [overflow-wrap:anywhere]">
+            {result.stage}
+          </dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-sm text-slate-400">Code</dt>
+          <dd className="mt-1 break-words font-mono text-sm [overflow-wrap:anywhere]">
+            {result.code}
+          </dd>
+        </div>
+      </dl>
+    </section>
+  )
+}
+
+function GenericErrorNotice({ headingId, message, title }) {
+  return (
+    <div
+      aria-labelledby={headingId}
+      className="rounded-xl border border-rose-900 bg-rose-950/60 p-4 text-rose-200"
+      role="alert"
+    >
+      <h2
+        className="text-sm font-semibold uppercase tracking-wide"
+        id={headingId}
+      >
+        {title}
+      </h2>
+      <p className="mt-1">{message}</p>
+    </div>
+  )
+}
+
+async function requestScanResult(endpoint, hostname, isSuccessResponse) {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    SCAN_REQUEST_TIMEOUT_MS,
+  )
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ hostname }),
+      signal: controller.signal,
+    })
+
+    let responseBody
+    try {
+      responseBody = await response.json()
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        throw error
+      }
+      return {
+        result: null,
+        error: 'Sentinel returned an unexpected response. Please try again.',
+      }
+    }
+
+    if (!response.ok) {
+      if (isFailureResponse(responseBody)) {
+        return { result: responseBody, error: '' }
+      }
+      return {
+        result: null,
+        error: 'The scan request failed unexpectedly. Please try again.',
+      }
+    }
+
+    if (isSuccessResponse(responseBody) || isFailureResponse(responseBody)) {
+      return { result: responseBody, error: '' }
+    }
+
+    return {
+      result: null,
+      error: 'Sentinel returned an unexpected response. Please try again.',
+    }
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      return {
+        result: null,
+        error: 'The scan timed out. Please try again.',
+      }
+    }
+    return {
+      result: null,
+      error:
+        'Unable to reach the Sentinel API. Check that the backend is running.',
+    }
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
 function App() {
   const [hostname, setHostname] = useState('')
-  const [result, setResult] = useState(null)
-  const [error, setError] = useState('')
+  const [formError, setFormError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [tlsResult, setTlsResult] = useState(null)
+  const [tlsError, setTlsError] = useState('')
+  const [httpResult, setHttpResult] = useState(null)
+  const [httpError, setHttpError] = useState('')
 
   async function handleSubmit(event) {
     event.preventDefault()
 
     const trimmedHostname = hostname.trim()
+
+    setTlsResult(null)
+    setTlsError('')
+    setHttpResult(null)
+    setHttpError('')
+
     if (!trimmedHostname) {
-      setResult(null)
-      setError('Enter a hostname to scan.')
+      setFormError('Enter a hostname to scan.')
       return
     }
 
+    setFormError('')
     setIsLoading(true)
-    setResult(null)
-    setError('')
 
-    try {
-      const response = await fetch(TLS_LEAF_CERTIFICATE_ENDPOINT, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ hostname: trimmedHostname }),
-      })
+    const [tlsOutcome, httpOutcome] = await Promise.all([
+      requestScanResult(
+        TLS_LEAF_CERTIFICATE_ENDPOINT,
+        trimmedHostname,
+        isTlsSuccessResponse,
+      ),
+      requestScanResult(
+        HTTP_SECURITY_HEADERS_ENDPOINT,
+        trimmedHostname,
+        isHttpSuccessResponse,
+      ),
+    ])
 
-      let responseBody
-      try {
-        responseBody = await response.json()
-      } catch {
-        setError('Sentinel returned an unexpected response. Please try again.')
-        return
-      }
-
-      if (!response.ok) {
-        if (isFailureResponse(responseBody)) {
-          setResult(responseBody)
-        } else {
-          setError('The scan request failed unexpectedly. Please try again.')
-        }
-        return
-      }
-
-      if (isSuccessResponse(responseBody) || isFailureResponse(responseBody)) {
-        setResult(responseBody)
-      } else {
-        setError('Sentinel returned an unexpected response. Please try again.')
-      }
-    } catch {
-      setError(
-        'Unable to reach the Sentinel API. Check that the backend is running.',
-      )
-    } finally {
-      setIsLoading(false)
-    }
+    setTlsResult(tlsOutcome.result)
+    setTlsError(tlsOutcome.error)
+    setHttpResult(httpOutcome.result)
+    setHttpError(httpOutcome.error)
+    setIsLoading(false)
   }
 
   return (
@@ -428,11 +646,11 @@ function App() {
             Sentinel
           </p>
           <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-            TLS leaf certificate scan
+            Hostname security scan
           </h1>
           <p className="mt-4 max-w-2xl text-slate-400">
-            Check the publicly observable TLS certificate presented for a
-            hostname.
+            Check the publicly observable TLS certificate and HTTP security
+            headers presented for a hostname.
           </p>
         </header>
 
@@ -476,44 +694,74 @@ function App() {
           </form>
         </section>
 
-        <div className="mt-6">
-          {error && (
+        <div className="mt-6 grid min-w-0 gap-5">
+          {formError && (
             <p
               className="rounded-xl border border-rose-900 bg-rose-950/60 p-4 text-rose-200"
               role="alert"
             >
-              {error}
+              {formError}
             </p>
           )}
 
-          {result?.status === 'success' && (
-            <div className="grid min-w-0 gap-5">
-              <ScanSummary result={result} />
-              <CertificateDetails result={result} />
-              <FindingsList findings={result.findings} />
-            </div>
+          {tlsResult?.status === 'success' && (
+            <>
+              <ScanSummary result={tlsResult} />
+              <CertificateDetails result={tlsResult} />
+              <FindingsList
+                description="Certificate observations evaluated by the Sentinel backend."
+                emptyMessage="No certificate findings were returned."
+                findings={tlsResult.findings}
+                headingId="tls-certificate-findings-heading"
+                title="TLS certificate findings"
+              />
+            </>
           )}
 
-          {result?.status === 'failure' && (
-            <section className="rounded-xl border border-amber-900 bg-amber-950/30 p-6">
-              <p className="sr-only" role="status">
-                Scan could not be completed. Stage: {result.stage}. Code:{' '}
-                {result.code}.
-              </p>
-              <h2 className="text-lg font-semibold text-amber-300">
-                Scan could not be completed
-              </h2>
-              <dl className="mt-5 grid gap-5 sm:grid-cols-2">
-                <div>
-                  <dt className="text-sm text-slate-400">Stage</dt>
-                  <dd className="mt-1 font-mono text-sm">{result.stage}</dd>
-                </div>
-                <div>
-                  <dt className="text-sm text-slate-400">Code</dt>
-                  <dd className="mt-1 font-mono text-sm">{result.code}</dd>
-                </div>
-              </dl>
-            </section>
+          {tlsResult?.status === 'failure' && (
+            <CollectionFailureNotice
+              result={tlsResult}
+              title="TLS scan could not be completed"
+            />
+          )}
+
+          {tlsError && (
+            <GenericErrorNotice
+              headingId="tls-scan-error-heading"
+              message={tlsError}
+              title="TLS scan error"
+            />
+          )}
+
+          {httpResult?.status === 'success' && (
+            <>
+              <SecurityHeadersList
+                finalUrl={httpResult.final_url}
+                headers={httpResult.headers}
+              />
+              <FindingsList
+                description="Header observations evaluated by the Sentinel backend."
+                emptyMessage="No HTTP header findings were returned."
+                findings={httpResult.findings}
+                headingId="http-findings-heading"
+                title="HTTP findings"
+              />
+            </>
+          )}
+
+          {httpResult?.status === 'failure' && (
+            <CollectionFailureNotice
+              result={httpResult}
+              title="HTTP header scan could not be completed"
+            />
+          )}
+
+          {httpError && (
+            <GenericErrorNotice
+              headingId="http-scan-error-heading"
+              message={httpError}
+              title="HTTP header scan error"
+            />
           )}
         </div>
       </div>
