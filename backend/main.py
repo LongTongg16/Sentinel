@@ -15,9 +15,11 @@ from backend.http_models import (
     HttpCollectionStage,
     HttpHeaderCollectionFailure,
     HttpHeaderFindingCode,
+    HttpSecurityScore,
     NormalizedSecurityHeaders,
     SecurityHeaderValue,
 )
+from backend.http_scoring import calculate_http_security_score
 from backend.tls_certificate import CertificateParseError, parse_leaf_certificate
 from backend.tls_collector import CollectionResult, collect_verified_leaf
 from backend.tls_findings import (
@@ -101,6 +103,19 @@ class HttpHeaderFindingResponse(BaseModel):
     message: str
 
 
+class HttpScoreDeductionResponse(BaseModel):
+    control: str
+    points: int
+    reason: str
+
+
+class HttpSecurityScoreResponse(BaseModel):
+    score: int
+    grade: str
+    methodology: str
+    deductions: tuple[HttpScoreDeductionResponse, ...]
+
+
 class HttpSecurityHeadersSuccess(BaseModel):
     status: Literal["success"] = "success"
     requested_hostname: str
@@ -111,6 +126,7 @@ class HttpSecurityHeadersSuccess(BaseModel):
     redirect_count: int
     headers: NormalizedSecurityHeadersResponse
     findings: tuple[HttpHeaderFindingResponse, ...]
+    score: HttpSecurityScoreResponse
 
 
 class HttpSecurityHeadersFailure(BaseModel):
@@ -295,6 +311,22 @@ def _headers_response(
     )
 
 
+def _score_response(score: HttpSecurityScore) -> HttpSecurityScoreResponse:
+    return HttpSecurityScoreResponse(
+        score=score.score,
+        grade=score.grade,
+        methodology=score.methodology,
+        deductions=tuple(
+            HttpScoreDeductionResponse(
+                control=deduction.control,
+                points=deduction.points,
+                reason=deduction.reason,
+            )
+            for deduction in score.deductions
+        ),
+    )
+
+
 @app.post(
     "/api/v1/http/security-headers",
     response_model=HttpSecurityHeadersResponse,
@@ -321,6 +353,7 @@ async def collect_http_headers(
 
     normalized_headers = normalize_security_headers(result.headers)
     findings = evaluate_http_header_findings(normalized_headers)
+    score = calculate_http_security_score(normalized_headers)
 
     return HttpSecurityHeadersSuccess(
         requested_hostname=result.requested_hostname,
@@ -338,4 +371,5 @@ async def collect_http_headers(
             )
             for finding in findings
         ),
+        score=_score_response(score),
     )
