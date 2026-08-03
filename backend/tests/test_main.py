@@ -20,6 +20,7 @@ from backend.http_models import (
     HttpHeaderCollectionFailure,
     HttpResponseObservation,
 )
+from backend.http_scoring import METHODOLOGY
 from backend.tests.fixtures.certificate_factory import create_certificate_der
 from backend.tls_collector import CollectionResult
 from backend.tls_models import (
@@ -305,10 +306,60 @@ def test_http_security_headers_success_returns_metadata_headers_and_findings(
                 ),
             }
         ],
+        "score": {
+            "score": 100,
+            "grade": "A+",
+            "methodology": METHODOLOGY,
+            "deductions": [],
+        },
     }
     assert collector.calls == [
         ("example.com", HTTP_HEADER_COLLECTION_OVERALL_TIMEOUT)
     ]
+
+
+def test_http_security_headers_success_includes_score_deductions(
+    client: TestClient,
+) -> None:
+    collector = FakeHttpCollector(
+        HttpResponseObservation(
+            requested_hostname="example.com",
+            connected_ip=ipaddress.ip_address("93.184.216.34"),
+            final_url="https://example.com/",
+            final_hostname="example.com",
+            http_status_code=200,
+            headers=(),
+            redirect_count=0,
+        )
+    )
+    app.dependency_overrides[get_http_header_collector] = (
+        override_http_collector(collector)
+    )
+
+    response = client.post(
+        "/api/v1/http/security-headers",
+        json={"hostname": "example.com"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    # content-security-policy is deliberately absent: CSP is excluded from
+    # the numeric score (see backend.http_scoring._csp_deduction), even
+    # though the missing header still produces its own finding above.
+    assert body["score"]["score"] == 55
+    assert body["score"]["grade"] == "C"
+    assert body["score"]["methodology"] == METHODOLOGY
+    assert {
+        (deduction["control"], deduction["points"])
+        for deduction in body["score"]["deductions"]
+    } == {
+        ("strict-transport-security", 20),
+        ("framing-protection", 20),
+        ("x-content-type-options", 5),
+    }
+    for deduction in body["score"]["deductions"]:
+        assert isinstance(deduction["reason"], str) and deduction["reason"]
 
 
 @pytest.mark.parametrize(
