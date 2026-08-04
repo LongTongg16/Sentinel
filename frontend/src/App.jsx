@@ -34,6 +34,14 @@ const HTTP_HEADER_FIELDS = [
   { key: 'permissions_policy', label: 'Permissions-Policy' },
 ]
 
+const HTTP_SCORE_VALID_GRADES = [
+  'A+', 'A', 'A-',
+  'B+', 'B', 'B-',
+  'C+', 'C', 'C-',
+  'D+', 'D', 'D-',
+  'F',
+]
+
 function isFinding(value) {
   return (
     value !== null &&
@@ -77,6 +85,35 @@ function isNormalizedHeaders(value) {
   )
 }
 
+function isHttpScoreDeduction(value) {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    typeof value.control === 'string' &&
+    value.control.trim() !== '' &&
+    typeof value.points === 'number' &&
+    Number.isInteger(value.points) &&
+    value.points >= 0 &&
+    typeof value.reason === 'string' &&
+    value.reason.trim() !== ''
+  )
+}
+
+function isHttpSecurityScore(value) {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    typeof value.score === 'number' &&
+    Number.isInteger(value.score) &&
+    typeof value.grade === 'string' &&
+    HTTP_SCORE_VALID_GRADES.includes(value.grade) &&
+    typeof value.methodology === 'string' &&
+    value.methodology.trim() !== '' &&
+    Array.isArray(value.deductions) &&
+    value.deductions.every(isHttpScoreDeduction)
+  )
+}
+
 function isHttpSuccessResponse(value) {
   return (
     value?.status === 'success' &&
@@ -87,7 +124,8 @@ function isHttpSuccessResponse(value) {
     Number.isInteger(value.redirect_count) &&
     isNormalizedHeaders(value.headers) &&
     Array.isArray(value.findings) &&
-    value.findings.every(isFinding)
+    value.findings.every(isFinding) &&
+    isHttpSecurityScore(value.score)
   )
 }
 
@@ -138,6 +176,26 @@ function formatPublicKey(type, size) {
   }
 
   return normalizedType || 'Not applicable'
+}
+
+function formatControlName(control) {
+  if (typeof control !== 'string' || !control.trim()) {
+    return 'Not available'
+  }
+
+  const words = control
+    .split('-')
+    .map((word) => word.trim().toLowerCase())
+    .filter(Boolean)
+
+  if (words.length === 0) {
+    return 'Not available'
+  }
+
+  const [first, ...rest] = words
+  return [`${first.charAt(0).toUpperCase()}${first.slice(1)}`, ...rest].join(
+    ' ',
+  )
 }
 
 function severityPresentation(severity) {
@@ -193,6 +251,37 @@ function getSummarySeverity(findings) {
   }
 
   return 'unknown'
+}
+
+const HTTP_SCORE_GOOD_GRADES = ['A+', 'A', 'A-', 'B+', 'B', 'B-']
+const HTTP_SCORE_CAUTION_GRADES = ['C+', 'C', 'C-', 'D+', 'D', 'D-']
+
+function gradePresentation(grade) {
+  if (HTTP_SCORE_GOOD_GRADES.includes(grade)) {
+    return {
+      container: 'border-emerald-800 bg-emerald-950/35 text-emerald-100',
+      badge: 'border-emerald-700 bg-emerald-900/60 text-emerald-100',
+    }
+  }
+
+  if (HTTP_SCORE_CAUTION_GRADES.includes(grade)) {
+    return {
+      container: 'border-amber-700 bg-amber-950/40 text-amber-100',
+      badge: 'border-amber-600 bg-amber-900/70 text-amber-100',
+    }
+  }
+
+  if (grade === 'F') {
+    return {
+      container: 'border-rose-800 bg-rose-950/50 text-rose-100',
+      badge: 'border-rose-700 bg-rose-900/70 text-rose-100',
+    }
+  }
+
+  return {
+    container: 'border-slate-700 bg-slate-900 text-slate-100',
+    badge: 'border-slate-600 bg-slate-800 text-slate-200',
+  }
 }
 
 function MetadataItem({ label, children, monospace = false }) {
@@ -451,6 +540,110 @@ function HeaderRow({ header, label }) {
         </p>
       )}
     </div>
+  )
+}
+
+function HttpScoreSummary({ score }) {
+  const presentation = gradePresentation(score.grade)
+
+  return (
+    <section
+      className={`rounded-xl border p-5 sm:p-6 ${presentation.container}`}
+      aria-labelledby="http-score-heading"
+    >
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h2 className="text-xl font-semibold" id="http-score-heading">
+            HTTP Security Configuration Score
+          </h2>
+          <p
+            aria-label={`Score ${score.score} out of 100`}
+            className="mt-2 text-3xl font-bold tracking-tight"
+          >
+            {score.score}{' '}
+            <span className="text-lg font-medium opacity-75">/ 100</span>
+          </p>
+        </div>
+        <span
+          className={`inline-flex w-fit items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-semibold ${presentation.badge}`}
+        >
+          Grade {score.grade}
+        </span>
+      </div>
+    </section>
+  )
+}
+
+function ScoreDeductionItem({ deduction }) {
+  return (
+    <li className="min-w-0 rounded-lg border border-slate-800 bg-slate-950/50 p-4">
+      <div className="flex flex-wrap items-baseline gap-2">
+        <span className="text-lg font-bold text-rose-300">
+          -{deduction.points}
+          <span className="sr-only"> points</span>
+        </span>
+        <span className="min-w-0 break-words text-sm font-semibold text-slate-100 [overflow-wrap:anywhere]">
+          {formatControlName(deduction.control)}
+        </span>
+      </div>
+      <p className="mt-2 break-words text-sm leading-6 text-slate-300 [overflow-wrap:anywhere]">
+        {deduction.reason}
+      </p>
+    </li>
+  )
+}
+
+function ScoreDeductionsList({ deductions }) {
+  return (
+    <section
+      className="rounded-xl border border-slate-800 bg-slate-900 p-5 sm:p-6"
+      aria-labelledby="http-score-deductions-heading"
+    >
+      <h2
+        className="text-xl font-semibold text-slate-100"
+        id="http-score-deductions-heading"
+      >
+        Score deductions
+      </h2>
+      <p className="mt-2 text-sm text-slate-400">
+        Points deducted from the HTTP Security Configuration Score, as
+        reported by the Sentinel backend.
+      </p>
+
+      {deductions.length > 0 ? (
+        <ul className="mt-5 grid gap-3" role="list">
+          {deductions.map((deduction, index) => (
+            <ScoreDeductionItem
+              deduction={deduction}
+              key={`${deduction.control}-${index}`}
+            />
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-5 rounded-lg border border-slate-700 bg-slate-950/50 p-4 text-sm text-slate-300">
+          No scoring deductions were applied.
+        </p>
+      )}
+    </section>
+  )
+}
+
+function HttpScoreMethodology({ methodology }) {
+  return (
+    <section
+      className="rounded-xl border border-slate-800 bg-slate-900 p-5 sm:p-6"
+      aria-labelledby="http-score-methodology-heading"
+    >
+      <h2
+        className="text-xl font-semibold text-slate-100"
+        id="http-score-methodology-heading"
+      >
+        Scoring methodology
+      </h2>
+      <p className="mt-3 break-words text-sm leading-6 text-slate-300 [overflow-wrap:anywhere]">
+        {methodology}
+      </p>
+    </section>
   )
 }
 
@@ -735,6 +928,9 @@ function App() {
 
           {httpResult?.status === 'success' && (
             <>
+              <HttpScoreSummary score={httpResult.score} />
+              <ScoreDeductionsList deductions={httpResult.score.deductions} />
+              <HttpScoreMethodology methodology={httpResult.score.methodology} />
               <SecurityHeadersList
                 finalUrl={httpResult.final_url}
                 headers={httpResult.headers}
