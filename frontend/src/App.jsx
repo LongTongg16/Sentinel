@@ -570,6 +570,11 @@ function HttpScoreSummary({ score }) {
           Grade {score.grade}
         </span>
       </div>
+      <p className="mt-4 border-t border-current/20 pt-4 text-sm opacity-80">
+        Covers Strict-Transport-Security, framing protection,
+        Referrer-Policy, and X-Content-Type-Options only. Not an overall
+        security rating — TLS certificate health is assessed separately.
+      </p>
     </section>
   )
 }
@@ -842,8 +847,9 @@ function App() {
             Hostname security scan
           </h1>
           <p className="mt-4 max-w-2xl text-slate-400">
-            Check the publicly observable TLS certificate and HTTP security
-            headers presented for a hostname.
+            Sentinel passively inspects the TLS certificate and HTTP security
+            headers a hostname presents, then turns the observations into
+            explainable findings and an HTTP security configuration score.
           </p>
         </header>
 
@@ -903,7 +909,7 @@ function App() {
               <CertificateDetails result={tlsResult} />
               <FindingsList
                 description="Certificate observations evaluated by the Sentinel backend."
-                emptyMessage="No certificate findings were returned."
+                emptyMessage="No issues were detected by the configured certificate checks."
                 findings={tlsResult.findings}
                 headingId="tls-certificate-findings-heading"
                 title="TLS certificate findings"
@@ -937,7 +943,7 @@ function App() {
               />
               <FindingsList
                 description="Header observations evaluated by the Sentinel backend."
-                emptyMessage="No HTTP header findings were returned."
+                emptyMessage="No issues were detected by the configured HTTP header checks."
                 findings={httpResult.findings}
                 headingId="http-findings-heading"
                 title="HTTP findings"
