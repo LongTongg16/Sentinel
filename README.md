@@ -1,272 +1,483 @@
 # Sentinel
 
-Sentinel is a passive website security checker that safely inspects TLS
-certificates and HTTP security headers, converts the observations into
-explainable findings, and produces an HTTP security configuration score.
+**A passive website security configuration checker for TLS certificates and HTTP security controls.**
 
-## Why Sentinel
+Sentinel analyzes publicly observable website security configuration without exploiting, authenticating to, or actively attacking the target.
 
-Website security configuration is hard to read at a glance. A certificate
-chain or a raw `Strict-Transport-Security` header value doesn't mean much
-without context, and most people checking a site don't want to become a TLS
-or HTTP-header expert just to answer "is this configured reasonably?"
+Given a hostname, Sentinel performs SSRF-aware network collection, establishes a verified TLS connection, analyzes the site's X.509 leaf certificate and HTTP security headers, and presents structured findings through a React interface.
 
-Sentinel validates and resolves each hostname, connects to an approved
-numeric IP address, and performs a verified TLS handshake while using the
-validated hostname for SNI and certificate hostname verification. It observes
-what is publicly presented (certificate metadata, HTTP security headers) and
-turns that into structured, explainable findings — plus a score for the HTTP
-header configuration, with every deduction traceable to a specific control
-and reason.
+It also produces an explainable **HTTP Security Configuration Score** based on a deliberately limited set of controls that Sentinel can evaluate reliably.
 
-## Current Features
+---
 
-**TLS Certificate Analysis**
-- SSRF-aware target/hostname validation before any connection is made
-- A verified TLS handshake (hostname verification, chain validation)
-- X.509 leaf certificate parsing (subject, issuer, validity window, SANs,
-  signature algorithm, public key type/size)
-- Expiry and days-remaining calculation
-- Certificate findings (e.g. expiry issues)
+## Why I Built Sentinel
 
-**HTTP Security Headers**
-- Strict-Transport-Security (HSTS) evaluation
-- Content-Security-Policy (CSP) findings
-- X-Frame-Options / CSP `frame-ancestors` combined framing-protection
-  evaluation
-- X-Content-Type-Options evaluation
-- Referrer-Policy evaluation
-- Permissions-Policy findings
+Security scanners often produce findings without making it obvious how those findings were derived.
 
-**HTTP Security Configuration Score**
-- A 0–100 score with a letter grade, computed from a documented subset of
-  HTTP header controls
-- An explainable deduction breakdown: every point lost is tied to a specific
-  control and a human-readable reason
-- Scored controls: HSTS, framing protection, Referrer-Policy,
-  X-Content-Type-Options
-- Findings-only, intentionally excluded from the numeric score:
-  Content-Security-Policy, Permissions-Policy
+I built Sentinel to explore a different approach: collect observable security configuration, separate the evidence from the evaluation logic, and make each result explainable.
 
-## Screenshots
+The project has also been a practical way for me to develop deeper experience with:
 
-Example output from a prior scan of `example.com`. Live results for any
-hostname (including `example.com` itself) reflect whatever that site
-presents at scan time, so a fresh scan will not necessarily match these
-images exactly.
+- secure network programming
+- TLS and X.509 certificates
+- HTTP security controls
+- SSRF mitigation
+- defensive input handling
+- API architecture
+- automated testing
+- full-stack security tooling
 
-| Scan form | Example: TLS certificate result |
-|---|---|
-| ![Scan form](docs/assets/scan-form.png) | ![Example TLS certificate result](docs/assets/tls-certificate-result.png) |
+Sentinel is intentionally narrow in scope. It is a **security configuration checker**, not a vulnerability scanner or penetration-testing tool.
 
-| Example: HTTP score and deductions | Example: HTTP headers and findings |
-|---|---|
-| ![Example HTTP score and deductions](docs/assets/http-score-and-deductions.png) | ![Example HTTP headers and findings](docs/assets/http-headers-and-findings.png) |
+---
 
-## Architecture
+## What Sentinel Analyzes
 
-```mermaid
-flowchart TD
-    Frontend[React frontend]
-    Presentation[Frontend presentation]
+### TLS & X.509
 
-    Frontend -->|"independent TLS request"| TlsEndpoint["POST /api/v1/tls/leaf-certificate"]
-    Frontend -->|"independent HTTP request"| HttpEndpoint["POST /api/v1/http/security-headers"]
+Sentinel establishes a verified TLS connection and analyzes the site's leaf certificate.
 
-    TlsEndpoint --> TlsValidate[Target validation + resolution]
-    TlsValidate --> TlsCollect[TLS collection<br/>verified handshake]
-    TlsCollect --> TlsParse[Certificate parsing]
-    TlsParse --> TlsFindings[Certificate findings]
-    TlsFindings --> TlsResponse[TLS API response]
-    TlsResponse --> Presentation
+Currently implemented analysis includes:
 
-    HttpEndpoint --> HttpValidate[Target validation + resolution]
-    HttpValidate --> HttpCollect[HTTP collection<br/>redirect validation]
-    HttpCollect --> Normalize[Header normalization]
-    Normalize --> HttpFindings[HTTP evaluation + findings]
-    Normalize --> Scoring[HTTP scoring]
-    Normalize --> HttpResponse[HTTP API response]
-    HttpFindings --> HttpResponse
-    Scoring --> HttpResponse
-    HttpResponse --> Presentation
-```
+- certificate subject
+- certificate issuer
+- validity period
+- expiration status
+- DNS Subject Alternative Names
+- serial number
+- signature algorithm
+- public-key type
+- public-key size
+- SHA-256 certificate fingerprint
+- weak MD5/SHA-1 signature detection
 
-TLS and HTTP are two fully independent request/response paths — each
-performs its own target validation and DNS resolution, and a TLS failure
-does not block HTTP results (or vice versa). HTTP findings and HTTP scoring
-are both derived from the same normalized header data, not from each other
-— scoring never reads the findings list. The paths reuse common code rather
-than sharing a runtime validation result: both call the same target-validation
-and address-safety functions (`backend/tls_target.py`) and use the same
-connector and default TLS context factory
-(`backend/tls_collector.py`, reused by `backend/http_collector.py`).
+Certificate expiration findings distinguish between:
 
-## Security Design
+- expired certificates
+- certificates expiring within 7 days
+- certificates expiring within 30 days
 
-- **SSRF-aware target validation**: hostnames are validated before any
-  network call; raw IP literals are rejected outright (`backend/tls_target.py`).
-- **Private/internal address blocking**: every resolved address is checked
-  against private, loopback, link-local, multicast, unspecified, and
-  reserved ranges before a connection is attempted (`is_globally_routable`).
-- **Numeric-IP connections**: Sentinel connects to the specific IP address
-  returned by DNS resolution (not by re-resolving the hostname at connect
-  time), reducing exposure to DNS-rebinding races.
-- **Redirect destination validation**: HTTP redirects are only followed to
-  `https://` destinations, the new hostname is re-validated and re-resolved
-  through the same SSRF checks, and redirect loops are detected.
-- **Preserved hostname/SNI**: the validated hostname for each connection is
-  passed as `server_hostname` for TLS/SNI even though the connection itself
-  uses the resolved numeric address.
-- **TLS hostname verification**: the default `ssl` context is used, so
-  certificate chain and hostname verification both apply.
-- **Bounded timeouts**: every collection has an overall deadline enforced
-  with `asyncio.timeout_at`.
-- **Bounded redirect attempts**: HTTP collection follows at most 3 redirects
-  by default before failing closed.
-- **Bounded header size**: HTTP response headers are capped at 64 KB; an
-  oversized or malformed response is rejected rather than parsed.
-- **Typed error handling**: expected collection failures (DNS failures,
-  blocked addresses, TLS verification failures, timeouts, malformed
-  responses, etc.) are represented as typed, stable failure codes and
-  stages (e.g. `blocked_address`, `tls_verification_failed`,
-  `overall_timeout`) and mapped to an appropriate HTTP status. Unexpected
-  runtime errors outside these known failure paths can still surface as a
-  generic server error rather than a typed one.
+Sentinel relies on the verified TLS handshake for hostname verification rather than attempting to reproduce certificate wildcard matching with custom string logic.
 
-## Scoring Methodology
+---
 
-The HTTP Security Configuration Score starts from a baseline of 100 and
-applies documented, explainable point deductions — it never invents a bonus,
-so it never exceeds 100. Grade bands are fixed and documented:
+### HTTP Security Controls
 
-| Score range | Grade |
-|---|---|
-| 100 | A+ |
-| 90–99 | A |
-| 85–89 | A- |
-| 80–84 | B+ |
-| 70–79 | B |
-| 65–69 | B- |
-| 60–64 | C+ |
-| 50–59 | C |
-| 45–49 | C- |
-| 40–44 | D+ |
-| 30–39 | D |
-| 25–29 | D- |
-| 0–24 | F |
+Sentinel collects and evaluates selected HTTP response security headers.
 
-This score is Sentinel-specific. It is inspired by a subset of MDN HTTP
-Observatory's point-deduction approach, but it is **not** an official
-Observatory score and **not** a measure of overall website security.
+Currently analyzed controls include:
 
-Controls that currently affect the score:
-- Strict-Transport-Security (HSTS)
-- Framing protection (X-Frame-Options and/or CSP `frame-ancestors`)
+- `Strict-Transport-Security`
+- `Content-Security-Policy`
+- `X-Frame-Options`
+- CSP `frame-ancestors`
+- `X-Content-Type-Options`
+- `Referrer-Policy`
+- `Permissions-Policy`
+
+The HTTP collector also handles:
+
+- redirects
+- redirect destination revalidation
+- redirect loops
+- bounded redirect counts
+- overall request deadlines
+- response-header size limits
+
+Sentinel intentionally does not store or analyze response bodies as part of the current MVP.
+
+---
+
+## HTTP Security Configuration Score
+
+Sentinel provides an explainable **0–100 HTTP Security Configuration Score** with a letter grade.
+
+Rather than treating the score as an overall measure of whether a website is "secure," it represents only the HTTP configuration controls Sentinel currently evaluates.
+
+Each deduction includes:
+
+- the affected control
+- points deducted
+- the reason for the deduction
+
+Currently scored controls are:
+
+- HSTS
+- framing protection
 - Referrer-Policy
 - X-Content-Type-Options
 
-Controls that are findings-only and never affect the score:
-- Content-Security-Policy — Sentinel does not yet reproduce enough CSP
-  semantics (nonce/hash interaction with `unsafe-inline`, `strict-dynamic`,
-  per-directive `data:` handling) to score it reliably, so its contribution
-  is always 0 rather than a guess.
-- Permissions-Policy — there is no equivalent Observatory test to base a
-  defensible point value on.
+CSP and Permissions-Policy currently produce findings but are **not numerically scored**.
 
-TLS certificate health is assessed separately and is never combined into
-this numeric score. The full methodology text, including every documented
-divergence from Observatory, is returned by the API and rendered verbatim
-in the frontend (`backend/http_scoring.py`).
+This is intentional.
+
+During development, I found that simplified CSP scoring could create misleading deductions for valid modern policies. I chose to remove CSP from the numeric score until the evaluator can model its semantics with sufficient fidelity.
+
+Sentinel's scoring methodology is Sentinel-specific and inspired by a documented subset of MDN HTTP Observatory-style deductions. It is **not** an official MDN Observatory score.
+
+---
+
+## Security-First Network Design
+
+Because Sentinel accepts user-controlled hostnames and makes outbound network connections, the scanner itself creates an SSRF risk.
+
+The network collection pipeline is therefore designed around explicit target validation.
+
+```text
+User hostname
+      │
+      ▼
+Hostname validation
+      │
+      ▼
+DNS resolution
+      │
+      ▼
+IP address policy validation
+      │
+      ▼
+Approved numeric IP
+      │
+      ▼
+Network connection
+```
+
+Sentinel validates resolved addresses before connecting and rejects unsafe destination classes.
+
+Connections are then made to the approved **numeric IP address** rather than allowing the networking layer to blindly resolve the hostname again.
+
+For HTTPS connections, the original validated hostname is preserved for:
+
+- Server Name Indication (SNI)
+- certificate hostname verification
+
+Redirect destinations are resolved and validated again before Sentinel follows them.
+
+This design reduces exposure to DNS re-resolution and rebinding-style SSRF behavior while preserving correct TLS identity verification.
+
+---
+
+## Architecture
+
+Sentinel separates network collection from security evaluation.
+
+### TLS Pipeline
+
+```text
+hostname
+   ↓
+validation + DNS resolution
+   ↓
+approved numeric IP
+   ↓
+TCP/TLS connection
+   ↓
+verified TLS handshake
+   ↓
+leaf certificate DER
+   ↓
+X.509 parsing
+   ↓
+certificate findings
+   ↓
+FastAPI response
+   ↓
+React presentation
+```
+
+### HTTP Pipeline
+
+```text
+hostname
+   ↓
+validation + DNS resolution
+   ↓
+HTTP collection
+   ↓
+redirect validation
+   ↓
+normalized security headers
+   ↓
+security evaluation
+   ↓
+findings
+   ↓
+HTTP configuration score
+   ↓
+FastAPI response
+   ↓
+React presentation
+```
+
+The broader design follows the separation:
+
+```text
+Collection
+    ↓
+Normalization / Parsing
+    ↓
+Evaluation
+    ↓
+Findings
+    ↓
+Scoring (where applicable)
+    ↓
+Presentation
+```
+
+This keeps network behavior, parsing, security policy, scoring, and UI presentation from becoming tightly coupled.
+
+TLS and HTTP analyses are also independent. If one analysis fails, Sentinel can still return and display results from the other.
+
+---
 
 ## Tech Stack
 
-**Backend**
+### Backend
+
 - Python
 - FastAPI
+- asyncio
+- socket
+- Python `ssl`
 - `cryptography`
-- `asyncio` / `socket` / `ssl`
+- Pydantic
 - pytest
 
-**Frontend**
+### Frontend
+
+- JavaScript
 - React
 - Vite
 - Tailwind CSS
 
-## Running Locally
+### Engineering
 
-**Backend** (from the repository root):
+- Git
+- GitHub
+- feature branches
+- pull-request workflow
+- automated backend testing
 
-```bash
-python3 -m venv backend/venv
-source backend/venv/bin/activate
-pip install -r backend/requirements.txt
-pip install -r backend/requirements-dev.txt   # needed to run tests
-python -m uvicorn backend.main:app --reload --port 8000
+---
+
+## API
+
+Sentinel currently exposes two primary analysis endpoints.
+
+### TLS Certificate Analysis
+
+```text
+POST /api/v1/tls/leaf-certificate
 ```
 
-The API is now available at `http://127.0.0.1:8000`.
+Performs validated TLS collection and returns structured certificate information and findings.
 
-**Frontend** (in a second terminal):
+### HTTP Security Analysis
 
-```bash
-cd frontend
-npm install
-npm run dev
+```text
+POST /api/v1/http/security-headers
 ```
 
-The frontend dev server runs at `http://localhost:5173` and proxies `/api`
-requests to `http://127.0.0.1:8000` (see `frontend/vite.config.js`), so the
-backend must be running on port 8000 for scans to work.
+Collects HTTP security configuration and returns normalized security information, findings, and the HTTP configuration score.
 
-## Example Workflow
-
-1. Enter a hostname such as `example.com` and click Scan.
-2. Sentinel runs TLS and HTTP analysis concurrently.
-3. Certificate details and TLS findings appear.
-4. The HTTP Security Configuration Score and its deduction breakdown appear.
-5. HTTP security headers and HTTP findings appear.
-
-TLS and HTTP results are independent: if one fails (e.g. the HTTP request is
-blocked or times out) the other can still succeed and render normally.
+---
 
 ## Testing
 
-**Backend** (from the repository root, with the venv above activated):
+Sentinel currently has **257 passing backend tests**.
+
+Run the backend test suite with:
 
 ```bash
 python -m pytest backend/tests/
 ```
 
-As of this writing this is a snapshot, not a guarantee: **257 passed**. Run
-the command above for the current result.
+The test suite covers areas including:
 
-**Frontend** (from the repository root):
+- hostname validation
+- SSRF address policies
+- IPv4 and IPv6 handling
+- 6to4 IPv6 edge cases
+- DNS failures
+- connection failures
+- TLS verification failures
+- network timeouts
+- cancellation behavior
+- socket ownership and cleanup
+- certificate collection
+- malformed certificate DER
+- certificate expiration boundaries
+- SAN extraction
+- HTTP redirects
+- redirect loops
+- malformed HTTP responses
+- HSTS parsing
+- CSP policy parsing
+- framing protection
+- Referrer-Policy
+- scoring boundaries
+- deduction reconciliation
+- API error mappings
 
-```bash
-cd frontend
-npm run lint
-npm run build
-```
+TLS tests use static local certificate fixtures as well as certificates generated programmatically with `cryptography` for controlled test cases.
 
-There is currently no automated frontend test suite — frontend changes are
-verified with lint, a production build, and manual browser testing.
+### Frontend Validation
 
-## Limitations
+The frontend is currently verified through:
 
-- Passive configuration analysis only — Sentinel does not exploit or modify
-  the target.
-- Not a vulnerability scanner and not proof that a site is secure.
-- No authenticated testing, no exploitation.
-- CSP evaluation is simplified and is not numerically scored.
-- TLS configuration/cipher-suite analysis (protocol versions, cipher
-  suites, key exchange) is not implemented — only leaf-certificate
-  inspection is.
-- The HTTP score covers four header controls only; cookies, CORS,
-  Cross-Origin-Resource-Policy, Subresource-Integrity, and redirect
-  behavior are not evaluated at all.
+- manual browser testing
+- responsive rendering checks
+- `npm run lint`
+- `npm run build`
+- partial TLS/HTTP failure testing
+- malformed API response testing
+- rescanning
+- long header-value testing
+- score and deduction rendering
+- request timeout testing
 
-## Future Work
+Automated frontend testing is not yet implemented.
 
-- Deeper TLS configuration analysis (protocol/cipher-suite evaluation)
-- Stronger CSP analysis, potentially enabling numeric CSP scoring
-- Automated frontend tests
+---
+
+## Interesting Engineering Problems
+
+Building Sentinel exposed several security and reliability edge cases that were easy to miss initially.
+
+### 6to4 IPv6 and SSRF
+
+A 6to4 IPv6 address can embed an IPv4 destination.
+
+Initially, validating only the outer IPv6 representation could allow the embedded IPv4 policy to be overlooked.
+
+Sentinel's address policy was updated so 6to4 handling also considers the embedded IPv4 address.
+
+---
+
+### TLS Resource Ownership
+
+Async TLS collection required careful handling of socket ownership, stream cleanup, cancellation, and timeout precedence.
+
+This reinforced an important lesson from the project:
+
+> Resource cleanup is part of security and reliability, not just code hygiene.
+
+---
+
+### CSP Scoring
+
+Early scoring logic attempted to numerically evaluate CSP.
+
+That turned out to be misleading because modern CSP behavior includes semantics that a simplified evaluator cannot accurately represent.
+
+Rather than preserve a more impressive-looking score, CSP was removed from numeric scoring while remaining available as a security finding.
+
+---
+
+### Defensive HSTS Parsing
+
+Remote security headers are untrusted input.
+
+An extremely large `max-age` value could exceed Python's integer-conversion limits.
+
+Sentinel handles the resulting failure and treats the value as invalid instead of allowing malformed remote input to disrupt analysis.
+
+---
+
+### Multiple CSP Policies
+
+Separately enforced CSP policies cannot always be safely treated as one merged policy.
+
+Framing analysis was updated to evaluate repeated policies appropriately rather than producing an incorrect deduction from a merged representation.
+
+---
+
+## Current Limitations
+
+Sentinel is a portfolio security-engineering project and should not be treated as a comprehensive security assessment platform.
+
+The current MVP does **not** provide:
+
+- vulnerability scanning
+- exploitation
+- penetration testing
+- authenticated assessment
+- cookie security analysis
+- TLS protocol-version analysis
+- cipher-suite analysis
+- key-exchange analysis
+- complete CSP semantic analysis
+- CORS/CORP/SRI evaluation
+- full certificate-chain analysis beyond standard TLS verification
+- malware or phishing analysis
+- user authentication
+- persistent scan history
+- database storage
+- automated frontend tests
+- production deployment
+- verified CI/CD
+
+The HTTP score also does **not** represent the overall security of a website.
+
+These boundaries are deliberate. Sentinel reports only what it can support with observable evidence and implemented evaluation logic.
+
+---
+
+## Roadmap
+
+The next areas I would like to explore include:
+
+- deeper TLS protocol and cipher-suite analysis
+- richer CSP evaluation
+- automated frontend testing
+- CI/CD
+- production deployment
+
+Future features will continue to follow the same principle:
+
+**Prefer narrow, explainable, testable security analysis over broad claims that cannot be justified reliably.**
+
+---
+
+## Development Approach
+
+Sentinel has been developed with substantial AI-assisted implementation using tools including Claude Code and Codex.
+
+I use these tools as part of an engineering workflow that includes defining architecture and requirements, reviewing generated implementations, testing behavior, investigating failures, debugging security edge cases, and iterating on design decisions.
+
+The goal of the project is not to demonstrate how many lines of code I can manually type. It is to develop and demonstrate my ability to understand security problems, reason about engineering tradeoffs, validate implementations, and build security software whose behavior I can explain.
+
+---
+
+## Project Status
+
+**Working MVP**
+
+Implemented:
+
+- SSRF-aware target handling
+- TLS certificate collection
+- X.509 analysis
+- HTTP security-header analysis
+- explainable HTTP configuration scoring
+- FastAPI backend
+- React frontend
+- backend automated testing
+- architecture and methodology documentation
+
+Currently improving:
+
+- test coverage across the full stack
+- security-analysis depth
+- deployment and engineering workflow
+
+---
+
+## Disclaimer
+
+Sentinel is intended for educational, defensive, and authorized security analysis.
+
+It performs passive inspection of publicly observable website configuration and does not attempt exploitation or authenticated access.
+
+A Sentinel result should not be interpreted as proof that a website is secure or insecure. Security configuration is only one part of a broader security assessment.
