@@ -1,4 +1,6 @@
-const API_BASE_URL = '/api/v1'
+const CONFIGURED_API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim() ?? ''
+const API_ORIGIN = CONFIGURED_API_BASE_URL.replace(/\/+$/, '')
+const API_BASE_URL = `${API_ORIGIN}/api/v1`
 const TLS_LEAF_CERTIFICATE_ENDPOINT = `${API_BASE_URL}/tls/leaf-certificate`
 const HTTP_SECURITY_HEADERS_ENDPOINT = `${API_BASE_URL}/http/security-headers`
 const SCAN_REQUEST_TIMEOUT_MS = 15000

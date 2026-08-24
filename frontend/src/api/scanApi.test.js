@@ -41,6 +41,7 @@ describe('scanHostname', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
   })
 
   function mockResponses(tlsResponse, httpResponse) {
@@ -85,6 +86,50 @@ describe('scanHostname', () => {
     expect(fetchMock.mock.calls[0][1].signal).not.toBe(
       fetchMock.mock.calls[1][1].signal,
     )
+  })
+
+  it('uses a configured production API base URL', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'https://sentinel-api.example')
+    vi.resetModules()
+    const { scanHostname: scanConfiguredHostname } = await import(
+      './scanApi.js'
+    )
+    mockResponses(
+      makeResponse(makeTlsSuccess()),
+      makeResponse(makeHttpSuccess()),
+    )
+
+    await scanConfiguredHostname('example.com')
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'https://sentinel-api.example/api/v1/tls/leaf-certificate',
+      expect.anything(),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://sentinel-api.example/api/v1/http/security-headers',
+      expect.anything(),
+    )
+  })
+
+  it('removes trailing slashes from the configured API base URL', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'https://sentinel-api.example///')
+    vi.resetModules()
+    const { scanHostname: scanConfiguredHostname } = await import(
+      './scanApi.js'
+    )
+    mockResponses(
+      makeResponse(makeTlsSuccess()),
+      makeResponse(makeHttpSuccess()),
+    )
+
+    await scanConfiguredHostname('example.com')
+
+    expect(fetchMock.mock.calls.map(([endpoint]) => endpoint)).toEqual([
+      'https://sentinel-api.example/api/v1/tls/leaf-certificate',
+      'https://sentinel-api.example/api/v1/http/security-headers',
+    ])
   })
 
   it.each([

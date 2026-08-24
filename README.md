@@ -285,7 +285,7 @@ Collects HTTP security configuration and returns normalized security information
 
 ## Testing
 
-Sentinel currently has **257 passing backend tests**.
+Sentinel has deterministic backend and frontend test suites.
 
 Run the backend test suite with:
 
@@ -324,7 +324,8 @@ TLS tests use static local certificate fixtures as well as certificates generate
 
 ### Frontend Validation
 
-Frontend tooling requires Node.js 22 or newer. GitHub Actions uses Node.js 24.
+Frontend tooling requires Node.js 22.13 or newer. GitHub Actions and the Render
+Blueprint use Node.js 24.
 
 Install the exact locked dependencies and run the automated frontend checks with:
 
@@ -340,6 +341,85 @@ The Vitest and React Testing Library suite covers form validation, independent
 TLS/HTTP outcomes, malformed API responses, rescanning, timeout classification,
 accessibility semantics, and high-value rendering edge cases. Manual browser
 and responsive checks remain useful for behavior outside jsdom.
+
+---
+
+## Render Deployment Configuration
+
+Sentinel includes a [`render.yaml`](render.yaml) Blueprint for a small public
+portfolio deployment with two services:
+
+- `sentinel-api`: a Python 3.12.14 Render Web Service
+- `sentinel-web`: a Node.js 24 Render Static Site built from `frontend/`
+
+The backend starts from the repository root with:
+
+```bash
+uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+```
+
+The static site installs the committed lockfile with `npm ci`, runs
+`npm run build`, and publishes `frontend/dist`.
+
+### Required deployment environment
+
+Set these values to the exact public HTTPS origins assigned by Render. They are
+public configuration, not secrets, and should not contain paths:
+
+- Backend `SENTINEL_ALLOWED_ORIGINS`: comma-separated frontend origins, such as
+  `https://<frontend-service>.onrender.com`. Wildcards and credential-bearing or
+  path-bearing URLs are rejected.
+- Frontend `VITE_API_BASE_URL`: the backend origin, such as
+  `https://<backend-service>.onrender.com`. Trailing slashes are normalized.
+
+The Blueprint also declares these non-secret defaults:
+
+- `SENTINEL_MAX_CONCURRENT_SCANS=4`
+- `SENTINEL_SCAN_QUEUE_TIMEOUT_SECONDS=1`
+- `SENTINEL_RATE_LIMIT_REQUESTS=30`
+- `SENTINEL_RATE_LIMIT_WINDOW_SECONDS=60`
+
+Locally, leave `VITE_API_BASE_URL` unset. The frontend then calls the existing
+relative `/api/v1/...` routes and the Vite development proxy forwards `/api` to
+`http://127.0.0.1:8000`. When the backend CORS variable is unset, only
+`http://localhost:5173` and `http://127.0.0.1:5173` are allowed by default.
+
+### Deployment sequence
+
+1. In Render, create a new Blueprint from this repository and review the two
+   free-plan services before applying it.
+2. Supply the exact frontend HTTPS origin for `SENTINEL_ALLOWED_ORIGINS` and the
+   exact backend HTTPS origin for `VITE_API_BASE_URL` when prompted. Do not use
+   `*` for CORS.
+3. Confirm the backend health check path is `/health`, then apply the Blueprint.
+4. If Render assigns a different service URL than expected, update the two
+   cross-origin variables in the service dashboards and redeploy both services.
+   Vite variables are embedded at frontend build time, so changing
+   `VITE_API_BASE_URL` requires a new static-site build.
+5. Verify `GET https://<backend-service>.onrender.com/health` returns only
+   `{"status":"ok"}`, then submit a controlled hostname through the frontend.
+
+The scan request budget is deliberately global and in-memory per backend
+process. One frontend scan uses two requests (TLS and HTTP). Counts reset when a
+process restarts and are not shared if the service is scaled to multiple
+instances. Sentinel does not derive identity from `X-Forwarded-For`; this avoids
+trusting a caller-controlled proxy chain, but means the limiter is not a
+per-client fairness control. The concurrency cap is also per process. A request
+that cannot obtain a shared TLS/HTTP scan permit within the configured one-second
+queue timeout receives `503 Service Unavailable` before collection starts.
+These are basic portfolio-deployment safeguards, not a substitute for
+platform-level abuse monitoring or a distributed limiter.
+
+On Render's free tier, an idle web service spins down and its next request can
+incur a cold start. Free services are also subject to Render's service and
+outbound-traffic limits. Blueprint environment variables declared with
+`sync: false` are not copied into preview environments, so each preview needs
+its own `SENTINEL_ALLOWED_ORIGINS` and `VITE_API_BASE_URL` values.
+
+The unauthenticated `GET /health` route is excluded from scan admission and does
+not perform DNS or network collection. Added application logging reports only
+the configured admission limits at startup; it does not include target values,
+headers, bodies, secrets, or tracebacks.
 
 ---
 
@@ -416,8 +496,8 @@ The current MVP does **not** provide:
 - user authentication
 - persistent scan history
 - database storage
-- production deployment
-- verified CI/CD
+- a verified live public deployment
+- distributed or durable abuse controls
 
 The HTTP score also does **not** represent the overall security of a website.
 
@@ -431,8 +511,7 @@ The next areas I would like to explore include:
 
 - deeper TLS protocol and cipher-suite analysis
 - richer CSP evaluation
-- CI/CD
-- production deployment
+- deployment monitoring and live-environment validation
 
 Future features will continue to follow the same principle:
 
@@ -464,11 +543,14 @@ Implemented:
 - FastAPI backend
 - React frontend
 - backend automated testing
+- frontend automated testing
+- GitHub Actions CI
+- Render deployment configuration
 - architecture and methodology documentation
 
 Currently improving:
 
-- test coverage across the full stack
+- live deployment validation and monitoring
 - security-analysis depth
 - deployment and engineering workflow
 
