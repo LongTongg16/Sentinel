@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-export function ScanForm({ isLoading, onInvalidScan, onScan }) {
+export function ScanForm({ isLoading, onScan }) {
   const [hostname, setHostname] = useState('')
   const [formError, setFormError] = useState('')
 
@@ -10,7 +10,6 @@ export function ScanForm({ isLoading, onInvalidScan, onScan }) {
     const trimmedHostname = hostname.trim()
     if (!trimmedHostname) {
       setFormError('Enter a hostname to scan.')
-      onInvalidScan()
       return
     }
 

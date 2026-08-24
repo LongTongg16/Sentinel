@@ -257,7 +257,7 @@ TLS and HTTP analyses are also independent. If one analysis fails, Sentinel can 
 - GitHub
 - feature branches
 - pull-request workflow
-- automated backend testing
+- automated backend and frontend testing
 
 ---
 
@@ -324,20 +324,22 @@ TLS tests use static local certificate fixtures as well as certificates generate
 
 ### Frontend Validation
 
-The frontend is currently verified through:
+Frontend tooling requires Node.js 22 or newer. GitHub Actions uses Node.js 24.
 
-- manual browser testing
-- responsive rendering checks
-- `npm run lint`
-- `npm run build`
-- partial TLS/HTTP failure testing
-- malformed API response testing
-- rescanning
-- long header-value testing
-- score and deduction rendering
-- request timeout testing
+Install the exact locked dependencies and run the automated frontend checks with:
 
-Automated frontend testing is not yet implemented.
+```bash
+cd frontend
+npm ci
+npm run test
+npm run lint
+npm run build
+```
+
+The Vitest and React Testing Library suite covers form validation, independent
+TLS/HTTP outcomes, malformed API responses, rescanning, timeout classification,
+accessibility semantics, and high-value rendering edge cases. Manual browser
+and responsive checks remain useful for behavior outside jsdom.
 
 ---
 
@@ -414,7 +416,6 @@ The current MVP does **not** provide:
 - user authentication
 - persistent scan history
 - database storage
-- automated frontend tests
 - production deployment
 - verified CI/CD
 
@@ -430,7 +431,6 @@ The next areas I would like to explore include:
 
 - deeper TLS protocol and cipher-suite analysis
 - richer CSP evaluation
-- automated frontend testing
 - CI/CD
 - production deployment
 

@@ -37,12 +37,6 @@ function App() {
     }
   }
 
-  function handleInvalidScan() {
-    setScannedHostname('')
-    setTlsOutcome(emptyOutcome())
-    setHttpOutcome(emptyOutcome())
-  }
-
   const hasScan = scannedHostname !== ''
   const scanStatusMessage = !hasScan
     ? ''
@@ -78,7 +72,6 @@ function App() {
 
         <ScanForm
           isLoading={isLoading}
-          onInvalidScan={handleInvalidScan}
           onScan={handleScan}
         />
 
