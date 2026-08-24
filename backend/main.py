@@ -1,9 +1,14 @@
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Annotated, Literal, Protocol
 
-from fastapi import Depends, FastAPI, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from backend.deployment import DeploymentSettings
 from backend.http_collector import (
     HttpCollectionResult,
     collect_http_security_headers,
@@ -20,6 +25,11 @@ from backend.http_models import (
     SecurityHeaderValue,
 )
 from backend.http_scoring import calculate_http_security_score
+from backend.scan_admission import (
+    ScanAdmissionController,
+    ScanCapacityExceeded,
+    ScanRateLimitExceeded,
+)
 from backend.tls_certificate import CertificateParseError, parse_leaf_certificate
 from backend.tls_collector import CollectionResult, collect_verified_leaf
 from backend.tls_findings import (
@@ -37,6 +47,9 @@ from backend.tls_models import (
 
 TLS_COLLECTION_OVERALL_TIMEOUT = 10.0
 HTTP_HEADER_COLLECTION_OVERALL_TIMEOUT = 10.0
+
+logger = logging.getLogger(__name__)
+deployment_settings = DeploymentSettings.from_environment()
 
 
 class TlsLeafCertificateRequest(BaseModel):
@@ -173,6 +186,42 @@ def get_current_time() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def get_scan_admission_controller(
+    request: Request,
+) -> ScanAdmissionController:
+    return request.app.state.scan_admission_controller
+
+
+async def admit_scan_request(
+    controller: Annotated[
+        ScanAdmissionController,
+        Depends(get_scan_admission_controller),
+    ],
+) -> AsyncIterator[None]:
+    try:
+        controller.record_request()
+    except ScanRateLimitExceeded as error:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                "Scan request rate limit exceeded. Please try again later."
+            ),
+            headers={"Retry-After": str(error.retry_after_seconds)},
+        ) from None
+
+    try:
+        async with controller.scan_slot():
+            yield
+    except ScanCapacityExceeded:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Scan capacity is temporarily unavailable. "
+                "Please try again later."
+            ),
+        ) from None
+
+
 FAILURE_HTTP_STATUS: dict[FailureCode, int] = {
     FailureCode.INVALID_HOSTNAME: status.HTTP_422_UNPROCESSABLE_CONTENT,
     FailureCode.BLOCKED_ADDRESS: status.HTTP_403_FORBIDDEN,
@@ -210,7 +259,45 @@ HTTP_FAILURE_STATUS: dict[HttpCollectionFailureCode, int] = {
     HttpCollectionFailureCode.OVERALL_TIMEOUT: status.HTTP_504_GATEWAY_TIMEOUT,
 }
 
-app = FastAPI(title="Sentinel Security API")
+
+@asynccontextmanager
+async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+    application.state.scan_admission_controller = ScanAdmissionController(
+        max_concurrent_scans=deployment_settings.max_concurrent_scans,
+        scan_queue_timeout_seconds=(
+            deployment_settings.scan_queue_timeout_seconds
+        ),
+        rate_limit_requests=deployment_settings.rate_limit_requests,
+        rate_limit_window_seconds=(
+            deployment_settings.rate_limit_window_seconds
+        ),
+    )
+    logger.info(
+        (
+            "Configured scan admission with concurrency=%d, "
+            "queue_timeout=%.2fs, and rate=%d/%ds"
+        ),
+        deployment_settings.max_concurrent_scans,
+        deployment_settings.scan_queue_timeout_seconds,
+        deployment_settings.rate_limit_requests,
+        deployment_settings.rate_limit_window_seconds,
+    )
+    yield
+
+
+app = FastAPI(title="Sentinel Security API", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=list(deployment_settings.allowed_origins),
+    allow_credentials=False,
+    allow_methods=["POST"],
+    allow_headers=["Content-Type"],
+)
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
 
 
 @app.get("/")
@@ -225,6 +312,7 @@ def root() -> dict[str, str]:
 async def collect_tls_leaf_certificate(
     request: TlsLeafCertificateRequest,
     response: Response,
+    _admission: Annotated[None, Depends(admit_scan_request)],
     collector: Annotated[TlsCollector, Depends(get_tls_collector)],
     current_time: Annotated[datetime, Depends(get_current_time)],
 ) -> TlsLeafCertificateResponse:
@@ -334,6 +422,7 @@ def _score_response(score: HttpSecurityScore) -> HttpSecurityScoreResponse:
 async def collect_http_headers(
     request: HttpSecurityHeadersRequest,
     response: Response,
+    _admission: Annotated[None, Depends(admit_scan_request)],
     collector: Annotated[
         HttpHeaderCollector,
         Depends(get_http_header_collector),

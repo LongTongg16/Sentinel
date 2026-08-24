@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: sentinel-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.14
+      - key: SENTINEL_ALLOWED_ORIGINS
+        sync: false
+      - key: SENTINEL_MAX_CONCURRENT_SCANS
+        value: 4
+      - key: SENTINEL_SCAN_QUEUE_TIMEOUT_SECONDS
+        value: 1
+      - key: SENTINEL_RATE_LIMIT_REQUESTS
+        value: 30
+      - key: SENTINEL_RATE_LIMIT_WINDOW_SECONDS
+        value: 60
+
+  - type: web
+    name: sentinel-web
+    runtime: static
+    plan: free
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: NODE_VERSION
+        value: 24.14.1
+      - key: VITE_API_BASE_URL
+        sync: false
