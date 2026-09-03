@@ -45,17 +45,19 @@ function formatPublicKey(type, size) {
   return normalizedType || 'Not applicable'
 }
 
+// Level 3: a single piece of evidence. Monospace fields are boxed on a raised
+// surface so collected values read differently from prose.
 function MetadataItem({ children, className = '', label, monospace = false }) {
   return (
-    <div
-      className={`min-w-0 rounded-lg border border-slate-800 bg-slate-950/55 p-4 ${className}`}
-    >
-      <dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+    <div className={`min-w-0 ${className}`}>
+      <dt className="font-mono text-[0.62rem] uppercase tracking-[0.22em] text-ink-dim">
         {label}
       </dt>
       <dd
-        className={`mt-2 min-w-0 break-words text-sm leading-6 text-slate-100 [overflow-wrap:anywhere] ${
-          monospace ? 'font-mono' : ''
+        className={`tech-value mt-2 text-sm leading-6 text-ink ${
+          monospace
+            ? 'w-fit border border-hairline bg-panel-raised px-3 py-2 font-mono text-[0.8125rem]'
+            : ''
         }`}
       >
         {children}
@@ -64,17 +66,26 @@ function MetadataItem({ children, className = '', label, monospace = false }) {
   )
 }
 
+// Level 2: an editorial sidenote column carries the group identity, the
+// evidence grid sits beside it. Wide screens get the split; narrow screens
+// stack, which is also what keeps long values from forcing a wide track.
 function DetailGroup({ children, className = '', description, headingId, title }) {
   return (
     <section
       aria-labelledby={headingId}
-      className={`min-w-0 rounded-xl border border-slate-800 bg-slate-900 p-5 sm:p-6 ${className}`}
+      className={`min-w-0 border-t border-hairline pt-8 first:border-t-0 first:pt-0 ${className}`}
     >
-      <h3 className="text-lg font-semibold text-slate-100" id={headingId}>
-        {title}
-      </h3>
-      <p className="mt-1 text-sm leading-6 text-slate-400">{description}</p>
-      <dl className="mt-5 grid min-w-0 gap-3 sm:grid-cols-2">{children}</dl>
+      <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,12rem)_minmax(0,1fr)] lg:gap-12">
+        <div className="min-w-0">
+          <h3 className="group-heading" id={headingId}>
+            {title}
+          </h3>
+          <p className="mt-3 text-sm leading-6 text-ink-dim">{description}</p>
+        </div>
+        <dl className="grid min-w-0 gap-x-8 gap-y-6 sm:grid-cols-2">
+          {children}
+        </dl>
+      </div>
     </section>
   )
 }
@@ -83,7 +94,7 @@ function CertificateDetails({ result }) {
   const dnsNames = result.dns_names.filter((dnsName) => dnsName.trim())
 
   return (
-    <div className="grid min-w-0 gap-5 lg:grid-cols-2">
+    <div className="grid min-w-0 gap-8">
       <DetailGroup
         description="The approved target and address used for the verified connection."
         headingId="tls-connection-heading"
@@ -113,12 +124,13 @@ function CertificateDetails({ result }) {
           </time>
         </MetadataItem>
         <MetadataItem className="sm:col-span-2" label="Days remaining">
-          {formatDaysRemaining(result.days_remaining)}
+          <span className="font-mono text-xl font-semibold text-ink-strong">
+            {formatDaysRemaining(result.days_remaining)}
+          </span>
         </MetadataItem>
       </DetailGroup>
 
       <DetailGroup
-        className="lg:col-span-2"
         description="Certificate identity fields and DNS Subject Alternative Names."
         headingId="tls-identity-heading"
         title="Identity"
@@ -134,7 +146,7 @@ function CertificateDetails({ result }) {
             <ul className="flex min-w-0 flex-wrap gap-2">
               {dnsNames.map((dnsName, index) => (
                 <li
-                  className="max-w-full rounded-md bg-slate-800 px-2.5 py-1 font-mono text-xs [overflow-wrap:anywhere]"
+                  className="tech-value max-w-full border border-hairline bg-panel-raised px-2.5 py-1 font-mono text-xs text-ink"
                   key={`${dnsName}-${index}`}
                 >
                   {dnsName}
@@ -148,7 +160,6 @@ function CertificateDetails({ result }) {
       </DetailGroup>
 
       <DetailGroup
-        className="lg:col-span-2"
         description="Algorithms and identifiers observed on the leaf certificate."
         headingId="tls-cryptography-heading"
         title="Cryptography"
@@ -162,7 +173,11 @@ function CertificateDetails({ result }) {
         <MetadataItem label="Serial number" monospace>
           {displayText(result.serial_number)}
         </MetadataItem>
-        <MetadataItem label="SHA-256 fingerprint" monospace>
+        <MetadataItem
+          className="sm:col-span-2"
+          label="SHA-256 fingerprint"
+          monospace
+        >
           {displayText(result.certificate_sha256)}
         </MetadataItem>
       </DetailGroup>
@@ -175,33 +190,41 @@ export function TlsResults({ outcome }) {
 
   return (
     <section aria-labelledby="tls-analysis-heading" className="min-w-0">
-      <div className="mb-5 border-l-2 border-emerald-500 pl-4">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-400">
-          Scanner 01
-        </p>
-        <h2
-          className="mt-2 text-2xl font-semibold tracking-tight text-slate-100 sm:text-3xl"
-          id="tls-analysis-heading"
-        >
-          TLS Certificate Analysis
-        </h2>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
-          Verified connection details, leaf-certificate metadata, and
-          certificate findings remain separate from the HTTP score.
-        </p>
+      {/* Level 1 band */}
+      <div className="flex items-center gap-4">
+        <span className="font-mono text-[0.62rem] uppercase tracking-[0.3em] text-ink-dim">
+          01
+        </span>
+        <span aria-hidden="true" className="tick-rule h-px flex-1" />
+        <span className="font-mono text-[0.62rem] uppercase tracking-[0.3em] text-ink-dim">
+          Scanner
+        </span>
       </div>
 
-      <div className="grid min-w-0 gap-5">
+      <h2
+        className="font-display mt-8 text-3xl leading-[1.08] text-ink-strong sm:text-4xl lg:text-[2.75rem]"
+        id="tls-analysis-heading"
+      >
+        TLS Certificate Analysis
+      </h2>
+      <p className="mt-4 max-w-2xl text-sm leading-6 text-ink-dim sm:text-base sm:leading-7">
+        Verified connection details, leaf-certificate metadata, and certificate
+        findings remain separate from the HTTP score.
+      </p>
+
+      <div className="mt-10 grid min-w-0 gap-10">
         {result?.status === 'success' && (
           <>
             <CertificateDetails result={result} />
-            <FindingsList
-              description="Certificate observations evaluated by the Sentinel backend."
-              emptyMessage="No issues were detected by the configured certificate checks."
-              findings={result.findings}
-              headingId="tls-certificate-findings-heading"
-              title="TLS certificate findings"
-            />
+            <div className="min-w-0 border-t border-hairline pt-10">
+              <FindingsList
+                description="Certificate observations evaluated by the Sentinel backend."
+                emptyMessage="No issues were detected by the configured certificate checks."
+                findings={result.findings}
+                headingId="tls-certificate-findings-heading"
+                title="TLS certificate findings"
+              />
+            </div>
           </>
         )}
 

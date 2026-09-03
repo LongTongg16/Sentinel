@@ -1,8 +1,10 @@
+import { useEffect, useState } from 'react'
 import {
   CollectionFailureNotice,
   ErrorNotice,
 } from './ErrorNotice.jsx'
 import { FindingsList } from './FindingsList.jsx'
+import { CheckIcon, MinusIcon } from './icons.jsx'
 
 const HTTP_HEADER_FIELDS = [
   { key: 'strict_transport_security', label: 'Strict-Transport-Security' },
@@ -13,8 +15,33 @@ const HTTP_HEADER_FIELDS = [
   { key: 'permissions_policy', label: 'Permissions-Policy' },
 ]
 
-const HTTP_SCORE_GOOD_GRADES = ['A+', 'A', 'A-', 'B+', 'B', 'B-']
-const HTTP_SCORE_CAUTION_GRADES = ['C+', 'C', 'C-', 'D+', 'D', 'D-']
+function prefersReducedMotion() {
+  if (typeof window === 'undefined' || !window.matchMedia) return true
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
+// Ease a whole number from 0 up to `target` once on mount. Returns `target`
+// unchanged when reduced motion is requested or there is no matchMedia (tests).
+function useCountUp(target, duration = 750) {
+  const [reduced] = useState(prefersReducedMotion)
+  const animate = Number.isFinite(target) && !reduced
+  const [value, setValue] = useState(animate ? 0 : target)
+
+  useEffect(() => {
+    if (!animate) return
+    let raf
+    const start = performance.now()
+    const step = (now) => {
+      const t = Math.min(1, (now - start) / duration)
+      setValue(Math.round(target * (1 - Math.pow(1 - t, 3))))
+      if (t < 1) raf = requestAnimationFrame(step)
+    }
+    raf = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(raf)
+  }, [animate, target, duration])
+
+  return animate ? value : target
+}
 
 function displayText(value, fallback = 'Not available') {
   return typeof value === 'string' && value.trim() ? value : fallback
@@ -40,68 +67,65 @@ function formatControlName(control) {
   )
 }
 
-function gradePresentation(grade) {
-  if (HTTP_SCORE_GOOD_GRADES.includes(grade)) {
-    return {
-      container: 'border-emerald-800 bg-emerald-950/35 text-emerald-100',
-      badge: 'border-emerald-700 bg-emerald-900/60 text-emerald-100',
-    }
-  }
+// The meter shows the backend score and nothing else: the fill edge sits at
+// exactly score/100 and the ticks behind it are a plain 0-100 axis.
+function ScoreMeter({ score }) {
+  const fill = Number.isFinite(score) ? Math.min(100, Math.max(0, score)) : 0
 
-  if (HTTP_SCORE_CAUTION_GRADES.includes(grade)) {
-    return {
-      container: 'border-amber-700 bg-amber-950/40 text-amber-100',
-      badge: 'border-amber-600 bg-amber-900/70 text-amber-100',
-    }
-  }
-
-  if (grade === 'F') {
-    return {
-      container: 'border-rose-800 bg-rose-950/50 text-rose-100',
-      badge: 'border-rose-700 bg-rose-900/70 text-rose-100',
-    }
-  }
-
-  return {
-    container: 'border-slate-700 bg-slate-900 text-slate-100',
-    badge: 'border-slate-600 bg-slate-800 text-slate-200',
-  }
+  return (
+    <div aria-hidden="true" className="mt-9">
+      <div className="meter">
+        <span className="meter__fill" style={{ '--fill': `${fill}%` }} />
+      </div>
+      <div className="mt-2 flex justify-between font-mono text-[0.6rem] tracking-[0.18em] text-ink-faint">
+        <span>0</span>
+        <span>25</span>
+        <span>50</span>
+        <span>75</span>
+        <span>100</span>
+      </div>
+    </div>
+  )
 }
 
 function HttpScoreSummary({ score }) {
-  const presentation = gradePresentation(score.grade)
+  const shownScore = useCountUp(score.score)
 
   return (
     <section
       aria-labelledby="http-score-heading"
-      className={`rounded-xl border p-5 sm:p-7 ${presentation.container}`}
+      className="panel reticle min-w-0 p-6 sm:p-8"
     >
-      <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] opacity-70">
-            Backend-reported result
-          </p>
-          <h3 className="mt-2 text-xl font-semibold" id="http-score-heading">
-            HTTP Security Configuration Score
-          </h3>
-          <p
-            aria-label={`Score ${score.score} out of 100`}
-            className="mt-3 text-4xl font-bold tracking-tight"
-          >
-            {score.score}{' '}
-            <span className="text-lg font-medium opacity-70">/ 100</span>
-          </p>
-        </div>
-        <span
-          className={`inline-flex w-fit items-center rounded-full border px-4 py-2 text-sm font-semibold ${presentation.badge}`}
+      <p className="font-mono text-[0.62rem] uppercase tracking-[0.28em] text-ink-dim">
+        Backend-reported result
+      </p>
+      <h3 className="group-heading mt-4" id="http-score-heading">
+        HTTP Security Configuration Score
+      </h3>
+
+      <div className="mt-8 flex min-w-0 flex-wrap items-end gap-x-8 gap-y-5">
+        <p
+          aria-label={`Score ${score.score} out of 100`}
+          className="score-reveal font-mono text-7xl font-semibold leading-[0.82] text-ink-strong sm:text-8xl"
         >
+          {shownScore}
+          <span className="ml-1.5 align-baseline text-2xl font-normal tracking-normal text-ink-dim">
+            / 100
+          </span>
+        </p>
+        {/* One text node on purpose: "Grade A+" stays a single readable
+            string for assistive tech and for the suite's text queries. */}
+        <span className="mb-2 inline-flex shrink-0 items-baseline border border-hairline-strong bg-panel-raised px-4 py-3 font-mono text-lg font-semibold uppercase tracking-[0.2em] text-ink-strong">
           Grade {score.grade}
         </span>
       </div>
-      <p className="mt-5 border-t border-current/20 pt-5 text-sm leading-6 opacity-80">
-        Covers Strict-Transport-Security, framing protection,
-        Referrer-Policy, and X-Content-Type-Options only. It is not an overall
-        security rating; TLS certificate health is assessed separately.
+
+      <ScoreMeter score={score.score} />
+
+      <p className="tech-value mt-9 border-t border-hairline pt-6 text-sm leading-6 text-ink-dim">
+        Covers Strict-Transport-Security, framing protection, Referrer-Policy,
+        and X-Content-Type-Options only. It is not an overall security rating;
+        TLS certificate health is assessed separately.
       </p>
     </section>
   )
@@ -109,45 +133,39 @@ function HttpScoreSummary({ score }) {
 
 function ScoreDeductions({ deductions }) {
   return (
-    <section
-      aria-labelledby="http-score-deductions-heading"
-      className="rounded-xl border border-slate-800 bg-slate-900 p-5 sm:p-6"
-    >
-      <h3
-        className="text-xl font-semibold text-slate-100"
-        id="http-score-deductions-heading"
-      >
+    <section aria-labelledby="http-score-deductions-heading" className="min-w-0">
+      <h3 className="group-heading" id="http-score-deductions-heading">
         Score deductions
       </h3>
-      <p className="mt-2 text-sm leading-6 text-slate-400">
-        Points deducted from the HTTP Security Configuration Score, as
-        reported by the Sentinel backend.
+      <p className="mt-3 text-sm leading-6 text-ink-dim">
+        Points deducted from the HTTP Security Configuration Score, as reported
+        by the Sentinel backend.
       </p>
 
       {deductions.length > 0 ? (
-        <ul className="mt-5 grid gap-3">
+        <ul className="mt-5 grid min-w-0 gap-4">
           {deductions.map((deduction, index) => (
             <li
-              className="min-w-0 rounded-lg border border-slate-800 bg-slate-950/55 p-4"
+              className="flex min-w-0 gap-4 border-t border-hairline pt-4 first:border-t-0 first:pt-0"
               key={`${deduction.control}-${index}`}
             >
-              <div className="flex flex-wrap items-baseline gap-2">
-                <span className="text-lg font-bold text-rose-300">
-                  -{deduction.points}
-                  <span className="sr-only"> points</span>
-                </span>
-                <span className="min-w-0 break-words text-sm font-semibold text-slate-100 [overflow-wrap:anywhere]">
+              <span className="h-fit shrink-0 border border-hairline bg-panel-raised px-2.5 py-1 font-mono text-sm font-semibold text-ink-strong">
+                -{deduction.points}
+                <span className="sr-only"> points</span>
+              </span>
+              <div className="min-w-0">
+                <p className="tech-value text-sm font-medium text-ink">
                   {formatControlName(deduction.control)}
-                </span>
+                </p>
+                <p className="tech-value mt-1.5 text-sm leading-6 text-ink-dim">
+                  {deduction.reason}
+                </p>
               </div>
-              <p className="mt-2 break-words text-sm leading-6 text-slate-300 [overflow-wrap:anywhere]">
-                {deduction.reason}
-              </p>
             </li>
           ))}
         </ul>
       ) : (
-        <p className="mt-5 rounded-lg border border-slate-700 bg-slate-950/50 p-4 text-sm text-slate-300">
+        <p className="mt-5 border-l border-dashed border-hairline py-1 pl-4 text-sm text-ink-dim">
           No scoring deductions were applied.
         </p>
       )}
@@ -157,25 +175,19 @@ function ScoreDeductions({ deductions }) {
 
 function ScoreMethodology({ methodology }) {
   return (
-    <section
-      aria-labelledby="http-score-methodology-heading"
-      className="rounded-xl border border-slate-800 bg-slate-900 p-5 sm:p-6"
-    >
-      <h3
-        className="text-xl font-semibold text-slate-100"
-        id="http-score-methodology-heading"
-      >
+    <section aria-labelledby="http-score-methodology-heading" className="min-w-0">
+      <h3 className="group-heading" id="http-score-methodology-heading">
         Scoring methodology
       </h3>
-      <p className="mt-2 text-sm leading-6 text-slate-400">
+      <p className="mt-3 text-sm leading-6 text-ink-dim">
         The full backend-provided scoring scope and limitations remain
         available below.
       </p>
-      <details className="mt-5 rounded-lg border border-slate-700 bg-slate-950/55 open:border-slate-600">
-        <summary className="cursor-pointer rounded-lg px-4 py-3 text-sm font-semibold text-slate-200 outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900">
+      <details className="disclosure mt-5">
+        <summary className="font-mono text-[0.7rem] font-medium uppercase tracking-[0.18em] text-ink outline-none">
           Read full methodology
         </summary>
-        <p className="border-t border-slate-800 px-4 py-4 text-sm leading-7 text-slate-300 [overflow-wrap:anywhere]">
+        <p className="disclosure__body tech-value mt-4 border-l border-hairline pl-4 text-sm leading-7 text-ink-dim">
           {methodology}
         </p>
       </details>
@@ -186,13 +198,17 @@ function ScoreMethodology({ methodology }) {
 function HeaderPresenceBadge({ present }) {
   return (
     <span
-      className={`inline-flex w-fit shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold uppercase tracking-wide ${
+      className={`inline-flex shrink-0 items-center gap-1.5 border px-2.5 py-1 font-mono text-[0.62rem] uppercase tracking-[0.18em] ${
         present
-          ? 'border-emerald-700 bg-emerald-900/60 text-emerald-100'
-          : 'border-slate-600 bg-slate-800 text-slate-300'
+          ? 'border-ink font-semibold text-ink-strong'
+          : 'border-dashed border-hairline font-medium text-ink-dim'
       }`}
     >
-      <span aria-hidden="true">{present ? '✓' : '—'}</span>
+      {present ? (
+        <CheckIcon className="size-3.5" />
+      ) : (
+        <MinusIcon className="size-3.5" />
+      )}
       {present ? 'Present' : 'Missing'}
     </span>
   )
@@ -204,34 +220,32 @@ function HeaderItem({ header, label }) {
   const hasValue = value !== null && value.trim() !== ''
 
   let observedValue = 'No value observed'
-  let observedValueClasses = 'italic text-slate-400'
+  let observedValueClasses = 'italic text-ink-dim'
 
   if (isPresent && hasValue) {
     observedValue = value
-    observedValueClasses = 'font-mono text-slate-100'
+    observedValueClasses = 'font-mono text-[0.8125rem] text-ink'
   } else if (isPresent) {
     observedValue = 'Present with an empty value'
-    observedValueClasses = 'italic text-amber-200/80'
+    observedValueClasses = 'italic text-ink-dim'
   }
 
   return (
-    <li className="min-w-0 rounded-lg border border-slate-800 bg-slate-950/55 p-4 sm:p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <h4 className="min-w-0 break-words font-mono text-sm font-semibold text-slate-100 [overflow-wrap:anywhere]">
+    <li className={`min-w-0 border p-5 ${isPresent ? 'border-hairline bg-panel' : 'border-dashed border-hairline'}`}>
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-3 gap-y-2">
+        <h4 className="tech-value font-mono text-sm font-semibold text-ink-strong">
           {label}
         </h4>
         <HeaderPresenceBadge present={isPresent} />
       </div>
-      <div className="mt-4 border-t border-slate-800 pt-4">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-          Observed value
-        </p>
-        <p
-          className={`mt-2 min-w-0 whitespace-pre-wrap break-words text-sm leading-6 [overflow-wrap:anywhere] ${observedValueClasses}`}
-        >
-          {observedValue}
-        </p>
-      </div>
+      <p className="mt-5 font-mono text-[0.6rem] uppercase tracking-[0.22em] text-ink-dim">
+        Observed value
+      </p>
+      <p
+        className={`tech-value mt-1.5 whitespace-pre-wrap text-sm leading-6 ${observedValueClasses}`}
+      >
+        {observedValue}
+      </p>
     </li>
   )
 }
@@ -240,20 +254,17 @@ function SecurityHeaders({ finalUrl, headers }) {
   const hasFinalUrl = typeof finalUrl === 'string' && finalUrl.trim() !== ''
 
   return (
-    <section
-      aria-labelledby="http-headers-heading"
-      className="rounded-xl border border-slate-800 bg-slate-900 p-5 sm:p-6"
-    >
-      <h3 className="text-xl font-semibold text-slate-100" id="http-headers-heading">
+    <section aria-labelledby="http-headers-heading" className="min-w-0">
+      <h3 className="group-heading" id="http-headers-heading">
         HTTP security headers
       </h3>
-      <p className="mt-2 min-w-0 break-words text-sm leading-6 text-slate-400 [overflow-wrap:anywhere]">
+      <p className="tech-value mt-3 max-w-2xl text-sm leading-6 text-ink-dim">
         {hasFinalUrl
           ? `Header values observed in the final response at ${finalUrl}.`
           : 'Header values observed in the final HTTP response.'}
       </p>
 
-      <ul className="mt-5 grid min-w-0 items-start gap-3 lg:grid-cols-2">
+      <ul className="mt-6 grid min-w-0 items-start gap-4 sm:grid-cols-2">
         {HTTP_HEADER_FIELDS.map(({ key, label }) => (
           <HeaderItem header={headers[key]} key={key} label={label} />
         ))}
@@ -262,22 +273,17 @@ function SecurityHeaders({ finalUrl, headers }) {
   )
 }
 
-function ResponseDetail({
-  children,
-  className = '',
-  label,
-  monospace = false,
-}) {
+function ResponseDetail({ children, className = '', label, monospace = false }) {
   return (
-    <div
-      className={`min-w-0 rounded-lg border border-slate-800 bg-slate-950/55 p-4 ${className}`}
-    >
-      <dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+    <div className={`min-w-0 ${className}`}>
+      <dt className="font-mono text-[0.62rem] uppercase tracking-[0.22em] text-ink-dim">
         {label}
       </dt>
       <dd
-        className={`mt-2 break-words text-sm leading-6 text-slate-100 [overflow-wrap:anywhere] ${
-          monospace ? 'font-mono' : ''
+        className={`tech-value mt-2 text-sm leading-6 text-ink ${
+          monospace
+            ? 'w-fit border border-hairline bg-panel-raised px-3 py-2 font-mono text-[0.8125rem]'
+            : ''
         }`}
       >
         {children}
@@ -286,45 +292,66 @@ function ResponseDetail({
   )
 }
 
+// Telemetry ladder: the three stages the collector actually reports - what was
+// asked for, where the request ended up, and what came back. No invented
+// network stages, no progress model.
+function TelemetryStage({ children, index, label }) {
+  return (
+    <div className="grid min-w-0 gap-5 border-t border-hairline pt-6 first:border-t-0 first:pt-0 lg:grid-cols-[minmax(0,12rem)_minmax(0,1fr)] lg:gap-12">
+      <p className="flex items-center gap-3 font-mono text-[0.62rem] uppercase tracking-[0.26em] text-ink-dim">
+        <span
+          aria-hidden="true"
+          className="inline-flex size-5 items-center justify-center border border-hairline text-[0.6rem] text-ink-faint"
+        >
+          {index}
+        </span>
+        {label}
+      </p>
+      <dl className="grid min-w-0 gap-x-8 gap-y-5 sm:grid-cols-2">
+        {children}
+      </dl>
+    </div>
+  )
+}
+
 function HttpResponseDetails({ result }) {
   return (
-    <section
-      aria-labelledby="http-response-details-heading"
-      className="rounded-xl border border-slate-800 bg-slate-900 p-5 sm:p-6"
-    >
-      <h3
-        className="text-xl font-semibold text-slate-100"
-        id="http-response-details-heading"
-      >
+    <section aria-labelledby="http-response-details-heading" className="min-w-0">
+      <h3 className="group-heading" id="http-response-details-heading">
         HTTP response details
       </h3>
-      <p className="mt-2 text-sm leading-6 text-slate-400">
+      <p className="mt-3 max-w-xl text-sm leading-6 text-ink-dim">
         Connection and redirect metadata returned by the HTTP collector.
       </p>
-      <dl className="mt-5 grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <ResponseDetail label="Requested hostname">
-          {displayText(result.requested_hostname)}
-        </ResponseDetail>
-        <ResponseDetail label="Final hostname">
-          {displayText(result.final_hostname)}
-        </ResponseDetail>
-        <ResponseDetail label="Connected IP" monospace>
-          {displayText(result.connected_ip)}
-        </ResponseDetail>
-        <ResponseDetail label="HTTP status code">
-          {result.http_status_code}
-        </ResponseDetail>
-        <ResponseDetail label="Redirect count">
-          {result.redirect_count}
-        </ResponseDetail>
-        <ResponseDetail
-          className="sm:col-span-2 lg:col-span-3"
-          label="Final URL"
-          monospace
-        >
-          {displayText(result.final_url)}
-        </ResponseDetail>
-      </dl>
+
+      <div className="mt-6 grid min-w-0 gap-6">
+        <TelemetryStage index="A" label="Request">
+          <ResponseDetail className="sm:col-span-2" label="Requested hostname">
+            {displayText(result.requested_hostname)}
+          </ResponseDetail>
+        </TelemetryStage>
+
+        <TelemetryStage index="B" label="Destination">
+          <ResponseDetail label="Final hostname">
+            {displayText(result.final_hostname)}
+          </ResponseDetail>
+          <ResponseDetail label="Connected IP" monospace>
+            {displayText(result.connected_ip)}
+          </ResponseDetail>
+          <ResponseDetail className="sm:col-span-2" label="Final URL" monospace>
+            {displayText(result.final_url)}
+          </ResponseDetail>
+        </TelemetryStage>
+
+        <TelemetryStage index="C" label="Response">
+          <ResponseDetail label="HTTP status code">
+            {result.http_status_code}
+          </ResponseDetail>
+          <ResponseDetail label="Redirect count">
+            {result.redirect_count}
+          </ResponseDetail>
+        </TelemetryStage>
+      </div>
     </section>
   )
 }
@@ -334,42 +361,54 @@ export function HttpResults({ outcome }) {
 
   return (
     <section aria-labelledby="http-analysis-heading" className="min-w-0">
-      <div className="mb-5 border-l-2 border-sky-500 pl-4">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-400">
-          Scanner 02
-        </p>
-        <h2
-          className="mt-2 text-2xl font-semibold tracking-tight text-slate-100 sm:text-3xl"
-          id="http-analysis-heading"
-        >
-          HTTP Security Configuration
-        </h2>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
-          Backend-reported score, observed security headers, HTTP findings,
-          and response metadata.
-        </p>
+      {/* Level 1 band */}
+      <div className="flex items-center gap-4">
+        <span className="font-mono text-[0.62rem] uppercase tracking-[0.3em] text-ink-dim">
+          02
+        </span>
+        <span aria-hidden="true" className="tick-rule h-px flex-1" />
+        <span className="font-mono text-[0.62rem] uppercase tracking-[0.3em] text-ink-dim">
+          Scanner
+        </span>
       </div>
 
-      <div className="grid min-w-0 gap-5">
+      <h2
+        className="font-display mt-8 text-3xl leading-[1.08] text-ink-strong sm:text-4xl lg:text-[2.75rem]"
+        id="http-analysis-heading"
+      >
+        HTTP Security Configuration
+      </h2>
+      <p className="mt-4 max-w-2xl text-sm leading-6 text-ink-dim sm:text-base sm:leading-7">
+        Backend-reported score, observed security headers, HTTP findings, and
+        response metadata.
+      </p>
+
+      <div className="mt-10 grid min-w-0 gap-12">
         {result?.status === 'success' && (
           <>
             <HttpScoreSummary score={result.score} />
-            <div className="grid min-w-0 gap-5 lg:grid-cols-2 lg:items-start">
+            <div className="grid min-w-0 gap-10 lg:grid-cols-2 lg:items-start lg:gap-12">
               <ScoreDeductions deductions={result.score.deductions} />
               <ScoreMethodology methodology={result.score.methodology} />
             </div>
-            <SecurityHeaders
-              finalUrl={result.final_url}
-              headers={result.headers}
-            />
-            <FindingsList
-              description="Header observations evaluated by the Sentinel backend."
-              emptyMessage="No issues were detected by the configured HTTP header checks."
-              findings={result.findings}
-              headingId="http-findings-heading"
-              title="HTTP findings"
-            />
-            <HttpResponseDetails result={result} />
+            <div className="min-w-0 border-t border-hairline pt-10">
+              <SecurityHeaders
+                finalUrl={result.final_url}
+                headers={result.headers}
+              />
+            </div>
+            <div className="min-w-0 border-t border-hairline pt-10">
+              <FindingsList
+                description="Header observations evaluated by the Sentinel backend."
+                emptyMessage="No issues were detected by the configured HTTP header checks."
+                findings={result.findings}
+                headingId="http-findings-heading"
+                title="HTTP findings"
+              />
+            </div>
+            <div className="min-w-0 border-t border-hairline pt-10">
+              <HttpResponseDetails result={result} />
+            </div>
           </>
         )}
 
