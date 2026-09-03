@@ -1,36 +1,44 @@
+import { CriticalIcon, HelpIcon, InfoIcon, WarningIcon } from './icons.jsx'
+
+// Monochrome severity. Five independent, non-colour signals move together:
+// the left rail (width + brightness + solid/dashed), the card fill, the card
+// border style, the chip treatment (solid / outlined / dashed), and the icon
+// shape. The written label is always present, so nothing depends on styling
+// alone and nothing depends on opacity alone.
 function severityPresentation(severity) {
   if (severity === 'critical') {
     return {
       label: 'Critical',
-      symbol: '!',
-      container: 'border-rose-800 bg-rose-950/45 text-rose-100',
-      badge: 'border-rose-700 bg-rose-900/70 text-rose-100',
+      Icon: CriticalIcon,
+      card: 'border-hairline-strong bg-panel',
+      rail: 'w-1.5 bg-ink-strong',
+      chip: 'border-ink-strong bg-ink-strong font-semibold text-bg',
     }
   }
-
   if (severity === 'warning') {
     return {
       label: 'Warning',
-      symbol: '▲',
-      container: 'border-amber-800 bg-amber-950/35 text-amber-100',
-      badge: 'border-amber-700 bg-amber-900/70 text-amber-100',
+      Icon: WarningIcon,
+      card: 'border-hairline bg-panel',
+      rail: 'w-1 bg-ink',
+      chip: 'border-ink font-semibold text-ink-strong',
     }
   }
-
   if (severity === 'info') {
     return {
       label: 'Info',
-      symbol: 'i',
-      container: 'border-emerald-900 bg-emerald-950/30 text-emerald-100',
-      badge: 'border-emerald-800 bg-emerald-900/60 text-emerald-100',
+      Icon: InfoIcon,
+      card: 'border-hairline',
+      rail: 'w-0.5 bg-hairline-strong',
+      chip: 'border-hairline-strong font-medium text-ink-dim',
     }
   }
-
   return {
     label: 'Unknown',
-    symbol: '?',
-    container: 'border-slate-700 bg-slate-950/60 text-slate-100',
-    badge: 'border-slate-600 bg-slate-800 text-slate-200',
+    Icon: HelpIcon,
+    card: 'border-dashed border-hairline',
+    rail: 'w-0.5 bg-[repeating-linear-gradient(180deg,var(--color-hairline-strong)_0_4px,transparent_4px_9px)]',
+    chip: 'border-dashed border-hairline font-medium text-ink-dim',
   }
 }
 
@@ -39,31 +47,29 @@ function displayText(value, fallback = 'Not available') {
 }
 
 function FindingCard({ finding }) {
-  const presentation = severityPresentation(finding.severity)
+  const { Icon, label, card, rail, chip } = severityPresentation(
+    finding.severity,
+  )
 
   return (
-    <li
-      className={`min-w-0 rounded-lg border p-4 sm:p-5 ${presentation.container}`}
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <span
-          className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-semibold uppercase tracking-wide ${presentation.badge}`}
-        >
+    <li className={`finding flex min-w-0 border ${card}`}>
+      <span aria-hidden="true" className={`shrink-0 ${rail}`} />
+      <div className="min-w-0 flex-1 px-5 py-4 sm:px-6 sm:py-5">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
           <span
-            aria-hidden="true"
-            className="inline-flex size-4 items-center justify-center rounded-full border border-current text-[0.65rem]"
+            className={`inline-flex shrink-0 items-center gap-1.5 border px-2.5 py-1 font-mono text-[0.65rem] uppercase tracking-[0.18em] ${chip}`}
           >
-            {presentation.symbol}
+            <Icon className="size-3.5" />
+            {label}
           </span>
-          {presentation.label}
-        </span>
-        <code className="min-w-0 rounded bg-black/20 px-2 py-1 text-xs [overflow-wrap:anywhere]">
-          {displayText(finding.code)}
-        </code>
+          <code className="tech-value font-mono text-xs text-ink-dim">
+            {displayText(finding.code)}
+          </code>
+        </div>
+        <p className="tech-value mt-3.5 text-sm leading-6">
+          {displayText(finding.message)}
+        </p>
       </div>
-      <p className="mt-3 break-words text-sm leading-6 [overflow-wrap:anywhere]">
-        {displayText(finding.message)}
-      </p>
     </li>
   )
 }
@@ -76,26 +82,22 @@ export function FindingsList({
   title,
 }) {
   return (
-    <section
-      aria-labelledby={headingId}
-      className="rounded-xl border border-slate-800 bg-slate-900 p-5 sm:p-6"
-    >
-      <h3 className="text-xl font-semibold text-slate-100" id={headingId}>
+    <section aria-labelledby={headingId} className="min-w-0">
+      <h3 className="group-heading" id={headingId}>
         {title}
       </h3>
-      <p className="mt-2 text-sm leading-6 text-slate-400">{description}</p>
+      <p className="mt-3 max-w-xl text-sm leading-6 text-ink-dim">
+        {description}
+      </p>
 
       {findings.length > 0 ? (
-        <ul className="mt-5 grid gap-3">
+        <ul className="mt-6 grid min-w-0 gap-4">
           {findings.map((finding, index) => (
-            <FindingCard
-              finding={finding}
-              key={`${finding.code}-${index}`}
-            />
+            <FindingCard finding={finding} key={`${finding.code}-${index}`} />
           ))}
         </ul>
       ) : (
-        <p className="mt-5 rounded-lg border border-slate-700 bg-slate-950/50 p-4 text-sm text-slate-300">
+        <p className="mt-5 border-l border-dashed border-hairline py-1 pl-4 text-sm text-ink-dim">
           {emptyMessage}
         </p>
       )}

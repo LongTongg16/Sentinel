@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Claude Code local skills / tooling (installed via `npx ui-ux-pro-max-cli init`)
+# Local developer tooling only - not part of the Sentinel application.
+.claude/

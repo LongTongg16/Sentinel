@@ -1,1 +1,690 @@
-@import "tailwindcss";
+@import 'tailwindcss';
+
+/*
+ * Sentinel - strict monochrome instrument. Warm near-black paper, cream and
+ * white as the only accents. Energy comes from contrast, scale, spacing,
+ * border weight, illumination, texture, geometry and motion - never colour.
+ *
+ * Type system (three roles, no overlap):
+ *   --font-display  Fraunces       hero + the five Level 1 section titles
+ *   --font-mono     IBM Plex Mono  every piece of technical evidence, plus
+ *                                  eyebrows, indices, badges, scores, grades
+ *   --font-sans     IBM Plex Sans  descriptions, methodology, helper text
+ *
+ * Recurring Sentinel motifs:
+ *   .reticle    four corner brackets - an observation frame around a surface
+ *   .tick-rule  a measurement scale used as a section separator
+ *   plus the sweep line, the radar reticle, and the meter needle.
+ *
+ * Every decorative animation is disabled under prefers-reduced-motion at the
+ * bottom of this file. Nothing there carries state on its own.
+ */
+@theme {
+  --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto,
+    Helvetica, Arial, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas,
+    'Liberation Mono', monospace;
+
+  --color-bg: #0c0b0a; /* warm near-black - page */
+  --color-panel: #131110; /* elevated warm black - report surfaces */
+  --color-panel-raised: #1b1917; /* one more level - inputs, chips, code */
+  --color-ink: #ece7dd; /* light cream - body */
+  --color-ink-strong: #ffffff; /* near-white - emphasis, key numbers */
+  --color-ink-dim: #a8a096; /* muted warm gray - secondary */
+  --color-ink-faint: #6b655c; /* darker warm gray - placeholder / markings */
+  --color-hairline: #2a2622; /* subtle warm-gray border */
+  --color-hairline-strong: #443e37; /* illuminated border - hover, focus */
+}
+
+@layer base {
+  html {
+    background-color: var(--color-bg);
+  }
+
+  /* Predominantly black, but not dead: a barely-there coordinate grid under a
+     soft vignette. Both are fixed, so the page reads as one observed field. */
+  body {
+    background-color: var(--color-bg);
+    background-image:
+      radial-gradient(
+        130% 90% at 50% -10%,
+        rgba(0, 0, 0, 0) 42%,
+        rgba(0, 0, 0, 0.62) 100%
+      ),
+      repeating-linear-gradient(
+        90deg,
+        rgba(236, 231, 221, 0.022) 0 1px,
+        transparent 1px 76px
+      ),
+      repeating-linear-gradient(
+        0deg,
+        rgba(236, 231, 221, 0.022) 0 1px,
+        transparent 1px 76px
+      );
+    background-attachment: fixed;
+    color: var(--color-ink);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Headings default to the body sans (semibold). The display face is opt-in
+     via .font-display so only the hero and the Level 1 titles carry it. */
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: -0.006em;
+    color: var(--color-ink-strong);
+  }
+
+  ::selection {
+    background-color: var(--color-ink);
+    color: var(--color-bg);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ink-strong);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-hairline) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--color-hairline);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  /* Film grain - keeps large black regions from reading as empty. */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: -50%;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.038;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    animation: grain-drift 8s steps(6) infinite;
+  }
+
+  /* One slow cream light drifting behind the content. */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background: radial-gradient(
+      44rem 34rem at 50% -8%,
+      rgba(255, 255, 255, 0.055),
+      transparent 70%
+    );
+    animation: light-drift 34s ease-in-out infinite alternate;
+  }
+
+  #root {
+    position: relative;
+    z-index: 1;
+  }
+}
+
+@layer components {
+  /* ---------------------------------------------------------------- motifs */
+
+  /* Observation frame: four corner brackets drawn from eight 1px gradients.
+     The recurring Sentinel mark - it frames anything under inspection. */
+  .reticle {
+    position: relative;
+  }
+  .reticle::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    --reticle-color: var(--color-ink-faint);
+    --reticle-arm: 11px;
+    background:
+      linear-gradient(var(--reticle-color), var(--reticle-color)) 0 0 /
+        var(--reticle-arm) 1px no-repeat,
+      linear-gradient(var(--reticle-color), var(--reticle-color)) 0 0 / 1px
+        var(--reticle-arm) no-repeat,
+      linear-gradient(var(--reticle-color), var(--reticle-color)) 100% 0 /
+        var(--reticle-arm) 1px no-repeat,
+      linear-gradient(var(--reticle-color), var(--reticle-color)) 100% 0 / 1px
+        var(--reticle-arm) no-repeat,
+      linear-gradient(var(--reticle-color), var(--reticle-color)) 0 100% /
+        var(--reticle-arm) 1px no-repeat,
+      linear-gradient(var(--reticle-color), var(--reticle-color)) 0 100% / 1px
+        var(--reticle-arm) no-repeat,
+      linear-gradient(var(--reticle-color), var(--reticle-color)) 100% 100% /
+        var(--reticle-arm) 1px no-repeat,
+      linear-gradient(var(--reticle-color), var(--reticle-color)) 100% 100% /
+        1px var(--reticle-arm) no-repeat;
+    transition: opacity 0.24s ease;
+  }
+
+  /* Measurement scale used as a separator between Level 1 sections. */
+  .tick-rule {
+    background-image: repeating-linear-gradient(
+      90deg,
+      var(--color-hairline) 0 3px,
+      transparent 3px 9px
+    );
+  }
+  .tick-scale {
+    background-image: repeating-linear-gradient(
+      90deg,
+      var(--color-hairline) 0 1px,
+      transparent 1px 9px
+    );
+  }
+
+  /* --------------------------------------------------------------- surfaces */
+
+  .panel {
+    background-color: var(--color-panel);
+    border: 1px solid var(--color-hairline);
+    box-shadow:
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.04),
+      0 1px 2px 0 rgba(0, 0, 0, 0.4);
+    transition:
+      border-color 0.24s ease,
+      box-shadow 0.24s ease,
+      background-color 0.24s ease;
+  }
+  .panel:hover {
+    border-color: var(--color-hairline-strong);
+    box-shadow:
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.07),
+      0 2px 10px -2px rgba(0, 0, 0, 0.5);
+  }
+  .panel:hover > .reticle::before,
+  .panel.reticle:hover::before {
+    --reticle-color: var(--color-ink-dim);
+  }
+
+  .panel-raised {
+    background-color: var(--color-panel);
+    border: 1px solid var(--color-hairline);
+    box-shadow:
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.05),
+      0 10px 36px -14px rgba(0, 0, 0, 0.7);
+  }
+
+  /* ------------------------------------------------------------ scan panel */
+
+  .scan-panel {
+    position: relative;
+    overflow: hidden;
+  }
+  /* Cream line that sweeps the panel once on mount, then loops only while a
+     scan is actually running. Decorative - never the only status cue. */
+  .scan-panel::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 1px;
+    z-index: 2;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.6),
+      transparent
+    );
+    transform: translateY(-2px);
+    opacity: 0;
+    animation: scan-sweep 1.5s ease-in-out 0.25s 1;
+  }
+  .scan-panel[data-scanning='true']::after {
+    animation: scan-sweep 1.5s ease-in-out infinite;
+  }
+
+  /* Indeterminate rail under the input while scanning - no fake percentage. */
+  .scan-rail {
+    position: relative;
+    overflow: hidden;
+    background-color: var(--color-hairline);
+  }
+  .scan-rail::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    width: 38%;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      var(--color-ink-strong),
+      transparent
+    );
+    transform: translateX(-100%);
+    animation: rail-slide 1.3s ease-in-out infinite;
+  }
+
+  /* Small target that breathes while a scan is running. */
+  .pulse-dot {
+    animation: dot-pulse 1.6s ease-in-out infinite;
+  }
+
+  .scan-input {
+    transition:
+      border-color 0.2s ease,
+      box-shadow 0.2s ease,
+      background-color 0.2s ease;
+  }
+  .scan-input:hover:not(:disabled) {
+    border-color: var(--color-hairline-strong);
+  }
+  .scan-input:focus {
+    border-color: var(--color-ink-strong);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  }
+
+  /* Primary action: cream idle, white hover, one diagonal sheen pass, the
+     arrow steps forward, and the whole control presses down. */
+  .scan-button {
+    position: relative;
+    overflow: hidden;
+    background-color: var(--color-ink);
+    color: var(--color-bg);
+    transition:
+      background-color 0.18s ease,
+      transform 0.12s ease,
+      box-shadow 0.18s ease;
+  }
+  .scan-button:hover:not(:disabled) {
+    background-color: var(--color-ink-strong);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 18px -8px rgba(255, 255, 255, 0.35);
+  }
+  .scan-button:active:not(:disabled) {
+    transform: translateY(1px);
+    box-shadow: none;
+  }
+  .scan-button::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      100deg,
+      transparent 30%,
+      rgba(255, 255, 255, 0.55) 50%,
+      transparent 70%
+    );
+    transform: translateX(-140%);
+    transition: transform 0.6s ease;
+  }
+  .scan-button:hover:not(:disabled)::after {
+    transform: translateX(140%);
+  }
+  .scan-button:disabled {
+    opacity: 0.5;
+  }
+  .scan-button__arrow {
+    transition: transform 0.22s ease;
+  }
+  .scan-button:hover:not(:disabled) .scan-button__arrow {
+    transform: translateX(3px);
+  }
+
+  /* ------------------------------------------------------------- the score */
+
+  /* Horizontal meter. The fill edge sits at exactly the backend score - the
+     ticks behind it are an axis, not extra precision. */
+  .meter {
+    position: relative;
+    height: 14px;
+    overflow: hidden;
+    background-color: var(--color-panel-raised);
+    background-image: repeating-linear-gradient(
+      90deg,
+      var(--color-hairline) 0 1px,
+      transparent 1px 7px
+    );
+    border: 1px solid var(--color-hairline);
+  }
+  .meter__fill {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: var(--fill, 0%);
+    background-color: var(--color-ink);
+    animation: meter-fill 900ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .meter__fill::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    width: 2px;
+    background-color: var(--color-ink-strong);
+  }
+
+  /* ----------------------------------------------------------- disclosures */
+
+  .disclosure > summary {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    cursor: pointer;
+    list-style: none;
+    transition: color 0.18s ease;
+  }
+  .disclosure > summary::-webkit-details-marker {
+    display: none;
+  }
+  .disclosure > summary::before {
+    content: '';
+    flex: none;
+    width: 9px;
+    height: 9px;
+    border: 1px solid var(--color-ink-dim);
+    transition:
+      background-color 0.18s ease,
+      border-color 0.18s ease;
+  }
+  .disclosure > summary:hover {
+    color: var(--color-ink-strong);
+  }
+  .disclosure > summary:hover::before {
+    border-color: var(--color-ink-strong);
+  }
+  .disclosure[open] > summary::before {
+    background-color: var(--color-ink);
+    border-color: var(--color-ink);
+  }
+  .disclosure__body {
+    animation: disclosure-in 0.3s ease both;
+  }
+
+  /* Level 2 heading: every major result group (Connection, Validity, Score,
+     Security headers, Findings, Response details...). Mono, tightly tracked
+     and marked with a small solid square - engineered, not editorial. */
+  .group-heading {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1.4;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--color-ink-strong);
+  }
+  .group-heading::before {
+    content: '';
+    flex: none;
+    width: 6px;
+    height: 6px;
+    background-color: var(--color-ink-dim);
+  }
+
+  /* -------------------------------------------------------------- findings */
+
+  /* Severity is carried by border weight + border style + chip fill + icon +
+     an always-present text label. Opacity and colour are never load-bearing. */
+  .finding {
+    transition:
+      border-color 0.22s ease,
+      background-color 0.22s ease;
+  }
+  .finding:hover {
+    border-color: var(--color-hairline-strong);
+  }
+
+  /* ------------------------------------------------------------- signature */
+
+  .caret {
+    display: inline-block;
+    width: 0.5ch;
+    height: 1em;
+    margin-left: 0.2ch;
+    translate: 0 0.12em;
+    background-color: currentColor;
+    animation: caret-blink 1.1s steps(1) infinite;
+  }
+
+  /* Long unbroken technical strings (fingerprints, header values, IDs, URLs).
+     overflow-wrap:anywhere lowers the intrinsic min-content width so grid and
+     flex tracks built on minmax(0,1fr) + min-width:0 can actually constrain
+     them. Nothing is truncated - the value wraps and stays selectable. */
+  .tech-value {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    hyphens: none;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    letter-spacing: -0.022em;
+  }
+
+  /* Staggered entrance. --i sets the step; nothing loops. */
+  .reveal {
+    animation: sentinel-reveal 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(var(--i, 0) * 70ms);
+  }
+
+  .score-reveal {
+    animation: score-in 0.75s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  /* Hero reticle: an outer ring creeping round, and one radar sweep. */
+  .spin-slow,
+  .radar-sweep {
+    transform-box: view-box;
+    transform-origin: center;
+  }
+  .spin-slow {
+    animation: sentinel-spin 90s linear infinite;
+  }
+  .radar-sweep {
+    animation: sentinel-spin 16s linear infinite;
+  }
+
+  @keyframes sentinel-reveal {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes score-in {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+      letter-spacing: 0.06em;
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+      letter-spacing: -0.02em;
+    }
+  }
+  @keyframes meter-fill {
+    from {
+      width: 0%;
+    }
+    to {
+      width: var(--fill, 0%);
+    }
+  }
+  @keyframes disclosure-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes grain-drift {
+    0% {
+      transform: translate3d(0, 0, 0);
+    }
+    100% {
+      transform: translate3d(-8%, 6%, 0);
+    }
+  }
+  @keyframes light-drift {
+    from {
+      transform: translate3d(-6vw, 0, 0) scale(1);
+    }
+    to {
+      transform: translate3d(6vw, 4vh, 0) scale(1.15);
+    }
+  }
+  @keyframes scan-sweep {
+    0% {
+      transform: translateY(-2px);
+      opacity: 0;
+    }
+    12% {
+      opacity: 1;
+    }
+    88% {
+      opacity: 1;
+    }
+    100% {
+      transform: translateY(calc(100% + 2px));
+      opacity: 0;
+    }
+  }
+  @keyframes rail-slide {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(360%);
+    }
+  }
+  @keyframes caret-blink {
+    0%,
+    49% {
+      opacity: 1;
+    }
+    50%,
+    100% {
+      opacity: 0;
+    }
+  }
+  @keyframes dot-pulse {
+    0%,
+    100% {
+      opacity: 0.35;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+  @keyframes sentinel-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  /*
+   * Reduced motion. Every decorative animation, transition-driven transform
+   * and hover movement above is neutralised here. State, hierarchy and the
+   * full content of each element are preserved - only movement is removed.
+   */
+  @media (prefers-reduced-motion: reduce) {
+    .reveal,
+    .score-reveal {
+      animation: none;
+    }
+    body::before {
+      animation: none;
+    }
+    body::after {
+      animation: none;
+      transform: none;
+    }
+    .scan-panel::after,
+    .scan-panel[data-scanning='true']::after {
+      animation: none;
+      opacity: 0;
+    }
+    .scan-rail::after {
+      animation: none;
+      transform: none;
+      width: 100%;
+      opacity: 0.5;
+    }
+    .pulse-dot {
+      animation: none;
+      opacity: 1;
+    }
+    .caret {
+      animation: none;
+      opacity: 0.6;
+    }
+    .meter__fill {
+      animation: none;
+    }
+    .disclosure__body {
+      animation: none;
+    }
+    .spin-slow,
+    .radar-sweep {
+      animation: none;
+    }
+    .panel {
+      transition: border-color 0.24s ease;
+      box-shadow:
+        inset 0 1px 0 0 rgba(255, 255, 255, 0.04),
+        0 1px 2px 0 rgba(0, 0, 0, 0.4);
+    }
+    .panel:hover {
+      box-shadow:
+        inset 0 1px 0 0 rgba(255, 255, 255, 0.04),
+        0 1px 2px 0 rgba(0, 0, 0, 0.4);
+    }
+    .scan-button {
+      transition: background-color 0.18s ease;
+    }
+    .scan-button:hover:not(:disabled),
+    .scan-button:active:not(:disabled) {
+      transform: none;
+      box-shadow: none;
+    }
+    .scan-button::after,
+    .scan-button:hover:not(:disabled)::after {
+      transition: none;
+      transform: translateX(-140%);
+    }
+    .scan-button__arrow,
+    .scan-button:hover:not(:disabled) .scan-button__arrow {
+      transition: none;
+      transform: none;
+    }
+    .reticle::before {
+      transition: none;
+    }
+  }
+}

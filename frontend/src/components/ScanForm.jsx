@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { ArrowRightIcon, TargetIcon } from './icons.jsx'
 
 export function ScanForm({ isLoading, onScan }) {
   const [hostname, setHostname] = useState('')
@@ -31,73 +32,102 @@ export function ScanForm({ isLoading, onScan }) {
   return (
     <section
       aria-labelledby="scan-form-heading"
-      className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5 shadow-2xl shadow-black/20 sm:p-7"
+      className="scan-panel panel-raised"
+      data-scanning={isLoading ? 'true' : 'false'}
     >
-      <div className="max-w-2xl">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-400">
+      {/* Instrument header strip. The right-hand readout is decorative - the
+          authoritative state lives in the button label, aria-busy, and the
+          polite live region in App. */}
+      <div className="flex items-center justify-between gap-4 border-b border-hairline px-6 py-3.5 sm:px-8">
+        <p className="flex items-center gap-2.5 font-mono text-[0.65rem] uppercase tracking-[0.28em] text-ink-dim">
+          <TargetIcon
+            className={`size-3.5 text-ink-faint ${isLoading ? 'pulse-dot' : ''}`}
+          />
           Scan target
         </p>
+        <p
+          aria-hidden="true"
+          className="font-mono text-[0.65rem] uppercase tracking-[0.28em] text-ink-faint"
+        >
+          {isLoading ? 'Active' : 'Standby'}
+        </p>
+      </div>
+
+      <div className="px-6 py-7 sm:px-8 sm:py-8">
         <h2
-          className="mt-2 text-xl font-semibold text-slate-100 sm:text-2xl"
+          className="text-xl font-semibold tracking-tight sm:text-2xl"
           id="scan-form-heading"
         >
           Assess a hostname
         </h2>
-        <p className="mt-2 text-sm leading-6 text-slate-400">
+        <p className="mt-2.5 max-w-xl text-sm leading-6 text-ink-dim">
           Sentinel runs the TLS certificate and HTTP header checks separately,
           then presents each result without combining their security meaning.
         </p>
-      </div>
 
-      <form className="mt-6" noValidate onSubmit={handleSubmit}>
-        <label
-          className="block text-sm font-medium text-slate-200"
-          htmlFor="hostname"
-        >
-          Hostname
-        </label>
-        <p className="mt-1 text-sm text-slate-400" id="hostname-help">
-          Enter a hostname only, without a URL scheme or path.
-        </p>
-
-        <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-          <input
-            aria-describedby={describedBy}
-            aria-invalid={formError ? 'true' : 'false'}
-            autoCapitalize="none"
-            autoComplete="off"
-            autoCorrect="off"
-            className="min-w-0 flex-1 rounded-lg border border-slate-500 bg-slate-950 px-4 py-3 text-slate-100 outline-none transition placeholder:text-slate-400 hover:border-slate-600 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/25 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={isLoading}
-            id="hostname"
-            name="hostname"
-            onChange={handleHostnameChange}
-            placeholder="example.com"
-            required
-            spellCheck="false"
-            type="text"
-            value={hostname}
-          />
-          <button
-            aria-busy={isLoading}
-            className="rounded-lg bg-emerald-400 px-7 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={isLoading}
-            type="submit"
-          >
-            {isLoading ? 'Scanning…' : 'Run scan'}
-          </button>
-        </div>
-
-        {formError && (
-          <p
-            className="mt-3 text-sm font-medium text-rose-300"
-            id="hostname-error"
-            role="alert"
-          >
-            {formError}
+        <form className="mt-8" noValidate onSubmit={handleSubmit}>
+          <div className="flex items-baseline justify-between gap-4">
+            <label
+              className="font-mono text-[0.65rem] font-medium uppercase tracking-[0.24em] text-ink-dim"
+              htmlFor="hostname"
+            >
+              Hostname
+            </label>
+            <span
+              aria-hidden="true"
+              className="font-mono text-[0.6rem] uppercase tracking-[0.24em] text-ink-faint"
+            >
+              Input
+            </span>
+          </div>
+          <p className="mt-2 text-sm text-ink-dim" id="hostname-help">
+            Enter a hostname only, without a URL scheme or path.
           </p>
-        )}
-      </form>
+
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+            <input
+              aria-describedby={describedBy}
+              aria-invalid={formError ? 'true' : 'false'}
+              autoCapitalize="none"
+              autoComplete="off"
+              autoCorrect="off"
+              className="scan-input min-w-0 flex-1 border border-hairline bg-panel-raised px-4 py-3.5 font-mono text-base text-ink-strong outline-none placeholder:text-ink-dim disabled:opacity-50 sm:text-sm"
+              disabled={isLoading}
+              id="hostname"
+              name="hostname"
+              onChange={handleHostnameChange}
+              placeholder="example.com"
+              required
+              spellCheck="false"
+              type="text"
+              value={hostname}
+            />
+            <button
+              aria-busy={isLoading}
+              className="scan-button inline-flex shrink-0 items-center justify-center gap-2.5 px-7 py-3.5 font-mono text-sm font-semibold uppercase tracking-[0.16em]"
+              disabled={isLoading}
+              type="submit"
+            >
+              {isLoading ? 'Scanning…' : 'Run scan'}
+              <ArrowRightIcon className="scan-button__arrow size-4" />
+            </button>
+          </div>
+
+          {isLoading && (
+            <div aria-hidden="true" className="scan-rail mt-5 h-px w-full" />
+          )}
+
+          {formError && (
+            <p
+              className="mt-4 font-mono text-sm font-medium text-ink-strong"
+              id="hostname-error"
+              role="alert"
+            >
+              {formError}
+            </p>
+          )}
+        </form>
+      </div>
     </section>
   )
 }
